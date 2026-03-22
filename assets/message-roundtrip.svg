@@ -1,0 +1,31 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" fill="#09121F"/>
+  <text x="86" y="78" fill="#F8FAFC" font-size="32" font-family="Inter, Arial, sans-serif">Weixin to Codex round trip</text>
+
+  <rect x="70" y="120" width="510" height="540" rx="24" fill="#F8FAFC"/>
+  <rect x="700" y="120" width="510" height="540" rx="24" fill="#111827"/>
+
+  <text x="108" y="168" fill="#0F172A" font-size="24" font-family="Inter, Arial, sans-serif">Weixin</text>
+  <text x="738" y="168" fill="#E5E7EB" font-size="24" font-family="Inter, Arial, sans-serif">Bridge log</text>
+
+  <rect x="110" y="206" width="320" height="74" rx="18" fill="#DCFCE7"/>
+  <text x="132" y="246" fill="#14532D" font-size="20" font-family="Inter, Arial, sans-serif">Tell me the current workspace</text>
+  <text x="132" y="272" fill="#166534" font-size="16" font-family="Inter, Arial, sans-serif">sent by the user</text>
+
+  <rect x="228" y="332" width="310" height="116" rx="18" fill="#DBEAFE"/>
+  <text x="252" y="372" fill="#1D4ED8" font-size="20" font-family="Inter, Arial, sans-serif">Current workspace:</text>
+  <text x="252" y="404" fill="#1E3A8A" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">/path/to/workspace</text>
+  <text x="252" y="432" fill="#1D4ED8" font-size="16" font-family="Inter, Arial, sans-serif">returned by Codex through acpx</text>
+
+  <rect x="740" y="210" width="430" height="344" rx="18" fill="#0B1220"/>
+  <text x="772" y="254" fill="#A7F3D0" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">[INFO] Starting standalone bridge</text>
+  <text x="772" y="294" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">getupdates -> incoming text message</text>
+  <text x="772" y="334" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">sendtyping status=1</text>
+  <text x="772" y="374" fill="#93C5FD" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">Prompting Codex session wx-user-1</text>
+  <text x="772" y="414" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">sendmessage chunk=1</text>
+  <text x="772" y="454" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">sendtyping status=2</text>
+  <text x="772" y="494" fill="#FCA5A5" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">/reset -> close session -> ensure session</text>
+
+  <rect x="740" y="580" width="430" height="54" rx="12" fill="#1E293B"/>
+  <text x="770" y="614" fill="#CBD5E1" font-size="18" font-family="Inter, Arial, sans-serif">Each Weixin sender gets an isolated Codex session.</text>
+</svg>

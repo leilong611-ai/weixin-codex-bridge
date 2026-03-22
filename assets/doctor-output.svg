@@ -1,0 +1,33 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" fill="#0F172A"/>
+  <rect x="76" y="52" width="1128" height="616" rx="24" fill="#111827"/>
+  <rect x="76" y="52" width="1128" height="56" rx="24" fill="#1F2937"/>
+  <circle cx="112" cy="80" r="8" fill="#EF4444"/>
+  <circle cx="140" cy="80" r="8" fill="#F59E0B"/>
+  <circle cx="168" cy="80" r="8" fill="#10B981"/>
+  <text x="206" y="86" fill="#E5E7EB" font-size="22" font-family="Menlo, Monaco, Consolas, monospace">doctor</text>
+
+  <text x="110" y="150" fill="#93C5FD" font-size="20" font-family="Menlo, Monaco, Consolas, monospace">$ node src/cli.mjs doctor --workspace "/path/to/workspace"</text>
+
+  <rect x="110" y="188" width="1060" height="420" rx="18" fill="#0B1220"/>
+  <text x="142" y="236" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">{</text>
+  <text x="142" y="276" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "workspace": "/path/to/workspace",</text>
+  <text x="142" y="316" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "acpxCommand": "./node_modules/.bin/acpx",</text>
+  <text x="142" y="356" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "acpxExists": true,</text>
+  <text x="142" y="396" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "acpxVersion": "0.3.1",</text>
+  <text x="142" y="436" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "linkedAccount": null,</text>
+  <text x="142" y="476" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  "runtime": {</text>
+  <text x="142" y="516" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">    "baseUrl": "https://ilinkai.weixin.qq.com",</text>
+  <text x="142" y="556" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">    "botType": "3",</text>
+  <text x="142" y="596" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">    "sessionPrefix": "wx"</text>
+  <text x="142" y="636" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">  }</text>
+  <text x="170" y="636" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">}</text>
+
+  <rect x="860" y="188" width="310" height="136" rx="16" fill="#1E293B"/>
+  <text x="886" y="228" fill="#F8FAFC" font-size="20" font-family="Inter, Arial, sans-serif">Doctor checks</text>
+  <text x="886" y="264" fill="#CBD5E1" font-size="18" font-family="Inter, Arial, sans-serif">- workspace path</text>
+  <text x="886" y="296" fill="#CBD5E1" font-size="18" font-family="Inter, Arial, sans-serif">- acpx binary presence</text>
+  <text x="886" y="328" fill="#CBD5E1" font-size="18" font-family="Inter, Arial, sans-serif">- saved runtime and linked account</text>
+
+  <text x="110" y="648" fill="#94A3B8" font-size="18" font-family="Inter, Arial, sans-serif">Use doctor before login to catch path and dependency issues early.</text>
+</svg>

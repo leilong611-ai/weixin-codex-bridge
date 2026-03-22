@@ -1,5 +1,7 @@
 # Weixin Codex Bridge
 
+[![public-check](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml)
+
 A standalone bridge from Weixin to Codex without OpenClaw routing.
 
 It talks to the Weixin bot HTTP API directly for QR login, message polling, replies, and typing state, then uses `acpx` to map each Weixin user to an isolated Codex session.
@@ -21,6 +23,26 @@ Target flow:
 `Weixin -> standalone bridge -> acpx -> Codex`
 
 This repo does not rely on OpenClaw channel routing, bindings, or agent dispatching.
+
+## Screenshots
+
+### 1. Login flow
+
+![login flow](./assets/login-flow.svg)
+
+The public repo uses a sanitized illustrative screenshot here. Real QR codes, account IDs, and local paths are intentionally excluded from the published materials.
+
+### 2. Doctor output
+
+![doctor output](./assets/doctor-output.svg)
+
+Use `doctor` before login to verify workspace, `acpx`, and the saved runtime state.
+
+### 3. Message round trip
+
+![message roundtrip](./assets/message-roundtrip.svg)
+
+After a text message arrives from Weixin, the bridge sends typing, prompts the matching Codex session, and returns a plain-text reply.
 
 ## Features
 
@@ -112,10 +134,17 @@ src/
   paths.mjs
 docs/
   build-process.md
+  configuration.md
+  faq.md
   privacy-and-publish-checklist.md
 scripts/
   public-check.sh
 ```
+
+## Configuration and FAQ
+
+- [docs/configuration.md](./docs/configuration.md)
+- [docs/faq.md](./docs/faq.md)
 
 ## Privacy and Publishing
 

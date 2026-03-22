@@ -1,0 +1,54 @@
+<svg width="1280" height="720" viewBox="0 0 1280 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1280" height="720" fill="#0B1020"/>
+  <rect x="60" y="56" width="1160" height="608" rx="24" fill="#111827"/>
+  <rect x="60" y="56" width="1160" height="56" rx="24" fill="#1F2937"/>
+  <circle cx="96" cy="84" r="8" fill="#EF4444"/>
+  <circle cx="124" cy="84" r="8" fill="#F59E0B"/>
+  <circle cx="152" cy="84" r="8" fill="#10B981"/>
+  <text x="190" y="90" fill="#E5E7EB" font-size="22" font-family="Menlo, Monaco, Consolas, monospace">standalone login</text>
+
+  <text x="96" y="152" fill="#93C5FD" font-size="20" font-family="Menlo, Monaco, Consolas, monospace">$ node src/cli.mjs login --workspace "/path/to/workspace"</text>
+  <text x="96" y="196" fill="#34D399" font-size="19" font-family="Menlo, Monaco, Consolas, monospace">[INFO] Scan the QR code below with Weixin</text>
+
+  <rect x="96" y="236" width="300" height="300" rx="16" fill="#F9FAFB"/>
+  <rect x="122" y="262" width="30" height="30" fill="#111827"/>
+  <rect x="152" y="262" width="30" height="30" fill="#111827"/>
+  <rect x="182" y="262" width="30" height="30" fill="#111827"/>
+  <rect x="212" y="262" width="30" height="30" fill="#F9FAFB"/>
+  <rect x="242" y="262" width="30" height="30" fill="#111827"/>
+  <rect x="272" y="262" width="30" height="30" fill="#F9FAFB"/>
+  <rect x="302" y="262" width="30" height="30" fill="#111827"/>
+  <rect x="332" y="262" width="38" height="38" fill="#111827"/>
+  <rect x="122" y="300" width="38" height="38" fill="#111827"/>
+  <rect x="180" y="300" width="22" height="22" fill="#111827"/>
+  <rect x="218" y="300" width="42" height="42" fill="#111827"/>
+  <rect x="280" y="300" width="22" height="22" fill="#111827"/>
+  <rect x="318" y="300" width="22" height="22" fill="#111827"/>
+  <rect x="122" y="360" width="24" height="24" fill="#111827"/>
+  <rect x="164" y="350" width="40" height="40" fill="#111827"/>
+  <rect x="224" y="352" width="18" height="18" fill="#111827"/>
+  <rect x="258" y="344" width="36" height="36" fill="#111827"/>
+  <rect x="314" y="356" width="24" height="24" fill="#111827"/>
+  <rect x="122" y="410" width="40" height="40" fill="#111827"/>
+  <rect x="182" y="420" width="20" height="20" fill="#111827"/>
+  <rect x="214" y="404" width="40" height="40" fill="#111827"/>
+  <rect x="274" y="418" width="18" height="18" fill="#111827"/>
+  <rect x="308" y="408" width="40" height="40" fill="#111827"/>
+  <rect x="122" y="470" width="32" height="32" fill="#111827"/>
+  <rect x="176" y="468" width="24" height="24" fill="#111827"/>
+  <rect x="220" y="470" width="30" height="30" fill="#111827"/>
+  <rect x="270" y="468" width="24" height="24" fill="#111827"/>
+  <rect x="314" y="470" width="30" height="30" fill="#111827"/>
+
+  <text x="450" y="268" fill="#E5E7EB" font-size="22" font-family="Inter, Arial, sans-serif">What happens during login</text>
+  <text x="450" y="320" fill="#CBD5E1" font-size="20" font-family="Inter, Arial, sans-serif">1. Fetch QR from the Weixin bot API</text>
+  <text x="450" y="362" fill="#CBD5E1" font-size="20" font-family="Inter, Arial, sans-serif">2. Render QR in terminal and save .local/login-qr.png</text>
+  <text x="450" y="404" fill="#CBD5E1" font-size="20" font-family="Inter, Arial, sans-serif">3. Poll login status until confirmed</text>
+  <text x="450" y="446" fill="#CBD5E1" font-size="20" font-family="Inter, Arial, sans-serif">4. Persist bot token and account metadata locally</text>
+
+  <rect x="450" y="498" width="640" height="88" rx="14" fill="#0F172A"/>
+  <text x="478" y="538" fill="#A7F3D0" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">STATUS=wait   STATUS=scaned   STATUS=confirmed</text>
+  <text x="478" y="570" fill="#E5E7EB" font-size="18" font-family="Menlo, Monaco, Consolas, monospace">The user must confirm inside Weixin after scanning.</text>
+
+  <text x="96" y="620" fill="#94A3B8" font-size="18" font-family="Inter, Arial, sans-serif">Sanitized illustrative screenshot for the public repository</text>
+</svg>
