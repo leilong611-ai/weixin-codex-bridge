@@ -134,3 +134,7 @@ scripts/
 ## 说明
 
 这个仓库的重点是“微信直连 Codex 的 standalone 方案”。如果你的目标是复用 OpenClaw 自带路由能力，那是另一条架构路线，不在本仓库范围内。
+
+## License
+
+MIT

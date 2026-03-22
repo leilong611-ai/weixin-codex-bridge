@@ -134,3 +134,7 @@ scripts/
 ## Notes
 
 This repository focuses on the standalone "Weixin directly to Codex" approach. If you want to reuse OpenClaw routing itself, that is a different architecture and intentionally out of scope here.
+
+## License
+
+MIT
