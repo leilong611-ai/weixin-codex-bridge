@@ -1,0 +1,23 @@
+{
+  "name": "weixin-codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Weixin to Codex bridge without OpenClaw routing",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/cli.mjs start",
+    "login": "node src/cli.mjs login",
+    "serve": "node src/cli.mjs serve",
+    "logout": "node src/cli.mjs logout",
+    "doctor": "node src/cli.mjs doctor",
+    "public-check": "bash ./scripts/public-check.sh"
+  },
+  "dependencies": {
+    "acpx": "0.3.1",
+    "qrcode": "1.5.4",
+    "qrcode-terminal": "0.12.0"
+  }
+}
