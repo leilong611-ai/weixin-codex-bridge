@@ -2,6 +2,8 @@
 
 一个不依赖 OpenClaw routing 的微信到 Codex standalone bridge。
 
+English version: [README.en.md](./README.en.md)
+
 它直接调用微信 bot HTTP API 完成扫码登录、收发消息和 typing 状态，再通过 `acpx` 把每个微信用户绑定到一个独立的 Codex 会话。
 
 ## 架构
