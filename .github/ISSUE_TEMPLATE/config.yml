@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a Question
+    url: https://github.com/leilong611-ai/weixin-codex-bridge/discussions
+    about: Ask questions and discuss with the community
