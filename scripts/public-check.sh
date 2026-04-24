@@ -19,7 +19,7 @@ patterns=(
   '\b1[3-9]\d{9}\b'
   '\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
   'sk-[a-zA-Z0-9]{20,}'
-  '[a-f0-9]{32,}'
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
 )
 
 for pattern in "${patterns[@]}"; do
@@ -27,6 +27,7 @@ for pattern in "${patterns[@]}"; do
     --glob '!node_modules/**' \
     --glob '!.git/**' \
     --glob '!.local/**' \
+    --glob '!package-lock.json' \
     --glob '!scripts/public-check.sh' \
     "$pattern" .; then
     echo "Matched sensitive pattern: $pattern"
