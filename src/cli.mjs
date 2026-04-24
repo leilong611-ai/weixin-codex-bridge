@@ -84,12 +84,17 @@ async function main() {
     const runtime = loadRuntime();
     const acpxExists = fs.existsSync(config.acpxCommand);
     const acpxVersion = acpxExists ? await doctorCodex(config) : "(missing)";
+    const safeAccount = account ? {
+      ...account,
+      botToken: account.botToken ? "***" + account.botToken.slice(-4) : "(none)",
+      rawAccountId: account.rawAccountId ? "***" : "(none)",
+    } : null;
     console.log(JSON.stringify({
       workspace: config.workspace,
       acpxCommand: config.acpxCommand,
       acpxExists,
       acpxVersion,
-      linkedAccount: account,
+      linkedAccount: safeAccount,
       runtime,
     }, null, 2));
     return;
