@@ -1,10 +1,20 @@
+<div align="center">
+
 # Weixin Codex Bridge
 
-[![public-check](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml)
+**不依赖 OpenClaw routing 的微信到 Codex standalone bridge**
 
-一个不依赖 OpenClaw routing 的微信到 Codex standalone bridge。
+[![public-check](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml)
+[![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+扫码登录 · 消息转发 · 会话隔离 · Typing 同步
 
 English version: [README.en.md](./README.en.md)
+
+</div>
+
+---
 
 它直接调用微信 bot HTTP API 完成扫码登录、收发消息和 typing 状态，再通过 `acpx` 把每个微信用户绑定到一个独立的 Codex 会话。
 
@@ -18,9 +28,7 @@ flowchart LR
   D <--> E["Codex CLI"]
 ```
 
-目标链路：
-
-`微信 -> standalone bridge -> acpx -> Codex`
+目标链路：`微信 -> standalone bridge -> acpx -> Codex`
 
 不走 OpenClaw 的 channel routing、bindings 或 agent 分发。
 
@@ -30,13 +38,13 @@ flowchart LR
 
 ![login flow](./assets/login-flow.svg)
 
-扫码登录时，bridge 会同时输出终端二维码并保存 `.local/login-qr.png`。真正敏感的二维码和账号不会放到公开仓库里，这里展示的是脱敏示意图。
+扫码登录时，bridge 会同时输出终端二维码并保存 `.local/login-qr.png`。
 
 ### 2. 诊断输出
 
 ![doctor output](./assets/doctor-output.svg)
 
-`doctor` 用来在登录前检查工作区、`acpx` 和当前本地运行态，适合先把路径和依赖问题挡在前面。
+`doctor` 用来在登录前检查工作区、`acpx` 和当前本地运行态。
 
 ### 3. 消息往返
 
@@ -55,17 +63,11 @@ flowchart LR
 
 ## 当前范围
 
-第一版只覆盖：
-
-- 私聊文本
-- 单 agent
-- 纯文本回复
-
-暂未覆盖：
-
-- 群聊路由
-- 图片、视频、文件上传下载
-- 多 agent 分发
+| 已覆盖 | 暂未覆盖 |
+|--------|---------|
+| 私聊文本 | 群聊路由 |
+| 单 agent | 图片、视频、文件上传下载 |
+| 纯文本回复 | 多 agent 分发 |
 
 ## 环境要求
 
@@ -76,7 +78,7 @@ flowchart LR
 ## 快速开始
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
 npm install
 ```
@@ -93,77 +95,44 @@ node src/cli.mjs doctor --workspace "/path/to/your/workspace"
 node src/cli.mjs login --workspace "/path/to/your/workspace"
 ```
 
-登录时会输出：
-
-- 终端二维码
-- `.local/login-qr.png` 本地二维码图片
-
 启动 bridge：
 
 ```bash
 node src/cli.mjs serve
 ```
 
-如果还没登录，也可以一步完成：
-
-```bash
-node src/cli.mjs start --workspace "/path/to/your/workspace"
-```
-
 ## 常用命令
 
 ```bash
-node src/cli.mjs doctor
-node src/cli.mjs logout
-npm run public-check
+node src/cli.mjs doctor    # 环境检查
+node src/cli.mjs logout    # 登出
+npm run public-check       # 发布前检查
 ```
 
-## 项目结构
-
-```text
-src/
-  cli.mjs            # 命令行入口
-  login.mjs          # 微信扫码登录
-  bridge.mjs         # 消息轮询和转发
-  weixin-api.mjs     # 微信 bot HTTP API 封装
-  codex-runner.mjs   # acpx / Codex 调用
-  text.mjs           # 文本提取和拆分
-  state.mjs          # 本地状态文件
-  config.mjs         # 运行配置
-  log.mjs            # 本地日志
-  paths.mjs          # 路径定义
-docs/
-  build-process.md
-  configuration.md
-  faq.md
-  privacy-and-publish-checklist.md
-scripts/
-  public-check.sh
-```
-
-## 配置与 Q&amp;A
+## 配置与 Q&A
 
 - [docs/configuration.md](./docs/configuration.md)
 - [docs/faq.md](./docs/faq.md)
 
 ## 隐私与发布
 
-- `.local/` 已加入 `.gitignore`，其中的 token、账号信息、同步游标和日志都不应提交
-- 发布前先运行 `npm run public-check`
-- 发布流程和人工检查项见 [docs/privacy-and-publish-checklist.md](./docs/privacy-and-publish-checklist.md)
+- `.local/` 已加入 `.gitignore`，token、账号信息不进仓库
+- 发布前运行 `npm run public-check`
+- 详见 [docs/privacy-and-publish-checklist.md](./docs/privacy-and-publish-checklist.md)
 
 ## 参考资料
 
 - 腾讯微信 OpenClaw 安装器：<https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin-cli>
 - 腾讯微信 OpenClaw 插件：<https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin>
 - OpenClaw ACP Agents：<https://docs.openclaw.ai/tools/acp-agents>
-- OpenClaw ACP CLI：<https://docs.openclaw.ai/cli/acp>
 - ACPX：<https://www.npmjs.com/package/acpx>
 
-## 说明
+---
 
-这个仓库的重点是“微信直连 Codex 的 standalone 方案”。如果你的目标是复用 OpenClaw 自带路由能力，那是另一条架构路线，不在本仓库范围内。
+<div align="center">
 
-## License
+**如果这个项目帮到了你，请给个 Star ⭐**
 
-MIT
+[Report Bug](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Request Feature](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Discussions](https://github.com/leilong611-ai/weixin-codex-bridge/discussions)
+
+</div>
