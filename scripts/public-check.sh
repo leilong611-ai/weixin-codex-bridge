@@ -11,10 +11,15 @@ status=0
 
 patterns=(
   '/Users/'
+  '/home/[a-z]'
   'C:\\Users\\'
   '@im\.bot:[A-Za-z0-9]+'
   '[A-Za-z0-9_-]+@im\.wechat'
   'qrcode=[0-9a-f]{16,}'
+  '\b1[3-9]\d{9}\b'
+  '\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'
+  'sk-[a-zA-Z0-9]{20,}'
+  '[a-f0-9]{32,}'
 )
 
 for pattern in "${patterns[@]}"; do
