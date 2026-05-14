@@ -1,20 +1,20 @@
-name: public-check
+name: ci
 
 on:
+  pull_request:
   push:
     branches:
       - main
-  pull_request:
 
 jobs:
-  public-check:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -23,5 +23,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run privacy check
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Public repository check
+        shell: bash
         run: npm run public-check

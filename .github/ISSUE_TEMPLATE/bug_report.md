@@ -1,24 +1,34 @@
 ---
-name: Bug Report
-about: Report a bug to help us improve
-title: '[Bug] '
+name: Bug report
+about: Report a reproducible bridge problem
+title: "[Bug] "
 labels: bug
-assignees: ''
+assignees: ""
 ---
 
-## Describe the bug
-A clear description of what the bug is.
+## What happened?
 
-## To Reproduce
-Steps to reproduce the behavior.
 
 ## Expected behavior
-What you expected to happen.
+
 
 ## Environment
-- OS:
-- Python/Node version:
-- Project version:
 
-## Additional context
-Any other context about the problem.
+- OS:
+- Node.js:
+- Codex Desktop installed: yes/no
+- Delivery mode: `desktop-ui` / `codex-cli`
+
+## Verification
+
+Commands run:
+
+```text
+
+```
+
+Relevant logs, with credentials and account IDs removed:
+
+```text
+
+```

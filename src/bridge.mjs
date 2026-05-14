@@ -15,6 +15,20 @@ import {
 
 const SESSION_EXPIRED_ERRCODE = -14;
 
+function describePromptError(promptError) {
+  if (promptError instanceof Error) {
+    const parts = [promptError.message];
+    if (typeof promptError.stderr === "string" && promptError.stderr.trim()) {
+      parts.push(promptError.stderr.trim());
+    }
+    if (typeof promptError.stdout === "string" && promptError.stdout.trim()) {
+      parts.push(promptError.stdout.trim());
+    }
+    return parts.filter(Boolean).join("\n\n");
+  }
+  return String(promptError);
+}
+
 async function safeTypingStart(account, message) {
   try {
     const config = await getConfig({
@@ -104,7 +118,7 @@ async function handleMessage(config, account, message) {
     await sendReply(account, message, reply || "空回复。");
   } catch (promptError) {
     error(`Codex prompt failed: ${String(promptError)}`);
-    await sendReply(account, message, `Codex 调用失败：${String(promptError).slice(0, 500)}`);
+    await sendReply(account, message, `Codex 调用失败：${describePromptError(promptError).slice(0, 2000)}`);
   } finally {
     await safeTypingStop(account, message, typingTicket);
   }
