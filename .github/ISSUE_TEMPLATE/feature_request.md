@@ -1,19 +1,20 @@
 ---
-name: Feature Request
-about: Suggest an idea for this project
-title: '[Feature] '
+name: Feature request
+about: Suggest an improvement for the bridge
+title: "[Feature] "
 labels: enhancement
-assignees: ''
+assignees: ""
 ---
 
-## Is your feature request related to a problem?
-A clear description of what the problem is.
+## Problem
 
-## Describe the solution you'd like
-A clear description of what you want to happen.
 
-## Describe alternatives you've considered
-Any alternative solutions or features you've considered.
+## Proposed behavior
 
-## Additional context
-Any other context about the feature request.
+
+## Alternatives considered
+
+
+## Notes
+
+Please do not include credentials, QR codes, cookies, or private message text.

@@ -3,6 +3,27 @@ import { spawn } from "node:child_process";
 import { info } from "./log.mjs";
 import { markdownToPlainText, sanitizeSessionName } from "./text.mjs";
 
+function stripAnsi(text) {
+  return (text ?? "").replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function normalizeOutput(text) {
+  return markdownToPlainText(stripAnsi(text).trim());
+}
+
+function formatStreamDetails(stdout, stderr) {
+  const parts = [];
+  const cleanStderr = stripAnsi(stderr).trim();
+  const cleanStdout = stripAnsi(stdout).trim();
+  if (cleanStderr) {
+    parts.push(cleanStderr);
+  }
+  if (cleanStdout && cleanStdout !== cleanStderr) {
+    parts.push(cleanStdout);
+  }
+  return parts.join("\n\n");
+}
+
 function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -24,14 +45,19 @@ function runCommand(command, args, options = {}) {
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) {
-        resolve({ stdout, stderr });
+        resolve({ stdout, stderr, code });
         return;
       }
-      reject(
-        new Error(
-          `Command failed (${code}): ${command} ${args.join(" ")}\n${stderr || stdout}`,
-        ),
+      const details = formatStreamDetails(stdout, stderr);
+      const err = new Error(
+        `Command failed (${code}): ${command} ${args.join(" ")}${details ? `\n${details}` : ""}`,
       );
+      err.code = code;
+      err.stdout = stdout;
+      err.stderr = stderr;
+      err.command = command;
+      err.args = args;
+      reject(err);
     });
   });
 }
@@ -75,7 +101,13 @@ export async function promptCodex(config, weixinUserId, prompt) {
     sessionName,
     prompt,
   ]);
-  return markdownToPlainText(result.stdout.trim());
+  const reply = normalizeOutput(result.stdout);
+  const diagnostics = stripAnsi(result.stderr).trim();
+  if (!diagnostics) {
+    return reply;
+  }
+  const extraOutput = `Codex 额外输出：\n${diagnostics.slice(0, 2000)}`;
+  return [reply, extraOutput].filter(Boolean).join("\n\n");
 }
 
 export async function resetSession(config, weixinUserId) {
@@ -92,8 +124,6 @@ export async function resetSession(config, weixinUserId) {
 }
 
 export async function doctorCodex(config) {
-  const result = await runCommand(config.acpxCommand, [
-    "--version",
-  ], { cwd: config.workspace });
+  const result = await runCommand(config.acpxCommand, ["--version"], { cwd: config.workspace });
   return result.stdout.trim();
 }
