@@ -1,0 +1,38 @@
+name: maintainer-check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  maintainer-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify CLI help
+        run: node src/cli.mjs help
+
+      - name: Verify doctor output shape
+        run: node src/cli.mjs doctor --workspace "$GITHUB_WORKSPACE"
+
+      - name: Verify maintainer docs exist
+        run: |
+          test -f README.md
+          test -f README.en.md
+          test -f CONTRIBUTING.md
+          test -f SECURITY.md
+          test -f CHANGELOG.md

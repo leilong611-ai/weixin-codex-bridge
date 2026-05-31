@@ -53,6 +53,16 @@ After a text message arrives from Weixin, the bridge sends typing, prompts the m
 - `/new` and `/reset` to reset the current user's session
 - Local runtime state under `.local/`
 
+## Why This Project Matters
+
+This repository is not trying to be "just another chatbot." It addresses a more specific maintainer workflow problem:
+
+- many Chinese-speaking users already coordinate day-to-day work in WeChat
+- Codex is strong at coding and maintainer workflows, but it does not naturally live inside WeChat
+- OpenClaw routing is powerful, but not every deployment needs the full routing and agent-dispatch layer
+
+That is why this project takes a narrower path: `Weixin -> standalone bridge -> Codex`. The value is practical rather than theoretical: it connects a high-frequency communication channel to an executable Codex workflow while keeping deployment and debugging boundaries simple.
+
 ## Current Scope
 
 Included in v0.1:
@@ -145,12 +155,35 @@ scripts/
 
 - [docs/configuration.md](./docs/configuration.md)
 - [docs/faq.md](./docs/faq.md)
+- [CONTRIBUTING.md](./CONTRIBUTING.md)
+- [SECURITY.md](./SECURITY.md)
+- [CHANGELOG.md](./CHANGELOG.md)
 
 ## Privacy and Publishing
 
 - `.local/` is ignored and must never be committed
 - Run `npm run public-check` before publishing changes
 - See [docs/privacy-and-publish-checklist.md](./docs/privacy-and-publish-checklist.md) for the release checklist
+
+## Why It Benefits From Stronger Security Review
+
+This project sits on a sensitive boundary: upstream it handles WeChat login state and messages, and downstream it drives local Codex sessions and runtime state. The meaningful risks are not ordinary UI bugs, but mistakes such as:
+
+- session-isolation failures that leak context across users
+- diagnostic output or logs exposing secrets
+- routing mistakes that send one user's content into another user's Codex session
+- accidental publication of `.local/` state, QR images, or account identifiers
+
+That is why the repository is a strong fit for maintainer automation and deeper security review, not just feature development.
+
+## Roadmap
+
+The near-term goal is not to add features blindly, but to make the bridge more reliable as a maintainable OSS project:
+
+- strengthen validation around session isolation and reset flows
+- improve log redaction and diagnostic boundaries
+- add more stable maintainer checks and pre-release automation
+- evaluate media-message support and group-chat allowlisting without breaking the standalone architecture
 
 ## References
 
