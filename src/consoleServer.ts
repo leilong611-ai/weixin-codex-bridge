@@ -20,6 +20,10 @@ import {
 import type { TaskSchedulerSnapshot } from "./messageScheduler.js";
 import { BridgeStateStore } from "./stateStore.js";
 import type { BridgeRunResult, CodexRunOptions } from "./types.js";
+import {
+  checkConsoleSecurity,
+  MAX_CONSOLE_BODY_BYTES,
+} from "./consoleAuth.js";
 
 export interface ConsoleServerHandle {
   close(): Promise<void>;
@@ -89,6 +93,19 @@ export function startConsoleServer(config: BridgeConfig, options: ConsoleServerO
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", `http://127.0.0.1:${config.consolePort}`);
+
+      // ---- Security checks for all /api/* routes ----
+      if (url.pathname.startsWith("/api/")) {
+        const security = checkConsoleSecurity(request, config.consoleToken);
+        if (!security.ok) {
+          // Always return 401/403 generic error — no detail leakage
+          const statusCode = security.statusCode === 429 ? 429 : 401;
+          send(response, statusCode, "application/json; charset=utf-8",
+            JSON.stringify({ error: statusCode === 429 ? "rate_limited" : "unauthorized" }));
+          return;
+        }
+      }
+
       if (request.method === "GET" && url.pathname === "/") {
         send(response, 200, "text/html; charset=utf-8", renderConsoleHtml());
         return;
@@ -247,7 +264,11 @@ export function startConsoleServer(config: BridgeConfig, options: ConsoleServerO
 function send(response: http.ServerResponse, statusCode: number, contentType: string, body: string): void {
   response.writeHead(statusCode, {
     "Cache-Control": "no-store",
-    "Content-Type": contentType
+    "Content-Type": contentType,
+    "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'",
+    "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
   });
   response.end(body);
 }
@@ -263,7 +284,7 @@ async function readJsonRequest<T>(request: http.IncomingMessage): Promise<T> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     total += buffer.length;
-    if (total > 128 * 1024) {
+    if (total > MAX_CONSOLE_BODY_BYTES) {
       throw new Error("Request body is too large.");
     }
     chunks.push(buffer);
