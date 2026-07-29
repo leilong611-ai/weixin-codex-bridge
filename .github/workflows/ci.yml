@@ -1,0 +1,94 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist/cli.js exists
+        run: node -e "require('fs').accessSync('dist/cli.js'); console.log('dist/cli.js exists')"
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Public repository check
+        shell: bash
+        run: npm run public-check
+
+      - name: Verify npm pack (dry run)
+        shell: bash
+        run: |
+          PACK_JSON=$(npm pack --dry-run --json 2>&1)
+          echo "Pack JSON:"
+          echo "$PACK_JSON"
+          # Verify dist/cli.js is in the pack
+          if echo "$PACK_JSON" | grep -q "dist/cli.js"; then
+            echo "✓ dist/cli.js included in pack"
+          else
+            echo "ERROR: dist/cli.js not in pack"
+            exit 1
+          fi
+          # Verify no .env files in pack
+          if echo "$PACK_JSON" | grep -q ".env"; then
+            echo "ERROR: .env file in pack"
+            exit 1
+          fi
+          echo "✓ No .env files in pack"
+
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test -- --run
+
+      - name: Public repository check
+        run: npm run public-check
+
+      - name: Verify npm pack (dry run)
+        run: |
+          PACK_JSON=$(npm pack --dry-run --json 2>&1)
+          if echo "$PACK_JSON" | grep -q "dist/cli.js"; then
+            echo "✓ dist/cli.js included in pack"
+          else
+            echo "ERROR: dist/cli.js not in pack"
+            exit 1
+          fi
