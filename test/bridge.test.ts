@@ -132,7 +132,8 @@ describe("CodexWeixinBridge", () => {
 
   it("stores a successful normal message so retry can resend it", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    // Need storeFullPrompts for retry to work
+    const bridge = new CodexWeixinBridge(makeConfig(root, true));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -442,16 +443,21 @@ function makeTempRoot(): string {
   return root;
 }
 
-function makeConfig(root: string): BridgeConfig {
+function makeConfig(root: string, storeFullPrompts = false): BridgeConfig {
   return {
+    accountId: undefined,
+    allowUnconfiguredDevMode: true,
     autoDesktopSession: false,
+    cliFallbackEnabled: false,
     codexCmdPath: "codex.cmd",
     codexCwd: root,
     codexHome: path.join(root, ".codex"),
     codexModel: "gpt-5.4-mini",
-    cliFallbackEnabled: false,
+    codexSessionId: undefined,
     consoleEnabled: false,
     consolePort: 18790,
+    consoleToken: "test-console-token",
+    defaultDeny: true,
     deliveryMode: "desktop-ui",
     desktopInputScriptPath: path.join(root, "Send-CodexDesktopInput.ps1"),
     desktopModelScriptPath: path.join(root, "Set-CodexDesktopModel.ps1"),
@@ -460,11 +466,23 @@ function makeConfig(root: string): BridgeConfig {
     maxParallelRuns: 1,
     openclawConfigPath: path.join(root, "openclaw", "openclaw.json"),
     openclawStateRoot: path.join(root, "openclaw"),
+    ownerPeerIds: ["wx-user", "wx-user-a", "wx-user-b"],
+    allowedPeerIds: [],
+    readonlyPeerIds: [],
     pollTimeoutMs: 1000,
     resumeAllSessions: true,
     resumeLast: true,
     skipBacklogOnStart: true,
-    weixinChannelVersion: "2.1.1"
+    weixinChannelVersion: "2.1.1",
+    sandboxRoot: "",
+    allowedWorkspaceRoots: [],
+    executionMode: "high-risk",
+    allowFullAuto: false,
+    allowSkipGitCheck: false,
+    logLevel: "minimal",
+    transcriptEnabled: false,
+    storeFullPrompts,
+    dataRetentionDays: 7,
   };
 }
 

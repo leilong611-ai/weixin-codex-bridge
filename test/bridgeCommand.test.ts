@@ -557,14 +557,19 @@ function makeTempRoot(): string {
 
 function makeConfig(root: string): BridgeConfig {
   return {
+    accountId: undefined,
+    allowUnconfiguredDevMode: true,
     autoDesktopSession: false,
     codexCmdPath: "codex.cmd",
     codexCwd: root,
     codexHome: path.join(root, ".codex"),
     codexModel: "gpt-5.4-mini",
+    codexSessionId: undefined,
     cliFallbackEnabled: false,
     consoleEnabled: false,
     consolePort: 18790,
+    consoleToken: "test-console-token",
+    defaultDeny: true,
     deliveryMode: "desktop-ui",
     desktopInputScriptPath: path.join(root, "Send-CodexDesktopInput.ps1"),
     desktopModelScriptPath: path.join(root, "Set-CodexDesktopModel.ps1"),
@@ -573,11 +578,23 @@ function makeConfig(root: string): BridgeConfig {
     maxParallelRuns: 1,
     openclawConfigPath: path.join(root, "openclaw", "openclaw.json"),
     openclawStateRoot: path.join(root, "openclaw"),
+    ownerPeerIds: [],
+    allowedPeerIds: [],
+    readonlyPeerIds: [],
     pollTimeoutMs: 1000,
     resumeAllSessions: true,
     resumeLast: true,
     skipBacklogOnStart: true,
-    weixinChannelVersion: "2.1.1"
+    weixinChannelVersion: "2.1.1",
+    sandboxRoot: root,
+    allowedWorkspaceRoots: [],
+    executionMode: "restricted",
+    allowFullAuto: false,
+    allowSkipGitCheck: false,
+    logLevel: "minimal",
+    transcriptEnabled: false,
+    storeFullPrompts: false,
+    dataRetentionDays: 7,
   };
 }
 
