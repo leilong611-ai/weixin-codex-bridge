@@ -14,8 +14,7 @@
 [SQLite Inbox — LOCAL, PRIVATE]
     ↓ Session Scheduler
 [Codex Desktop / CLI — LOCAL EXECUTION]
-    ↓ Output
-[WeChat Reply — REDACTED]
+    ↓ Output delivered to authorized peer
 ```
 
 ### Assets
@@ -95,11 +94,17 @@
 
 Please do not open a public GitHub issue for suspected security vulnerabilities.
 
-Instead:
+**Preferred reporting channel:** GitHub Security Advisories
+Navigate to the repository → Security → Advisories → New advisory
+This creates a private, controlled disclosure channel.
 
-1. Prepare a minimal reproduction without real credentials
-2. Describe impact, affected files, and expected fix direction
-3. Send the report through a private channel (email or private repository)
+**Alternative:** Contact the repository maintainers through their GitHub profiles.
+
+### Required information
+
+1. A minimal reproduction without real credentials
+2. Impact description, affected files, and expected fix direction
+3. Bridge version and commit hash
 
 **Do not include in any report:**
 - Real `botToken` values
@@ -109,11 +114,23 @@ Instead:
 
 **Do include:**
 - Placeholder values (`/path/to/workspace`, `example-user-id`, `example-bot-token`)
-- The bridge version and commit hash
 - Steps to reproduce
 - Expected vs actual behavior
 
 If a bug could expose user messages, login state, session data, or local files across users, treat it as a security issue even if the root cause looks like an ordinary logic bug.
+
+## Remaining Risks
+
+The following risks cannot be eliminated by the bridge alone and require operator awareness:
+
+| Risk | Mitigation |
+|------|-----------|
+| **Prompt injection** | Workspace isolation, restricted execution mode. Cannot be fully prevented. |
+| **Authorized malicious user** | Role-based access, sandboxed workspace. The operator chooses who to trust. |
+| **Codex-generated destructive commands** | Git branches, code review, backups. The bridge does not filter Codex output. |
+| **Lease loss during non-cancellable external side effects** | In-flight tracking + grace period. Some Codex subprocesses may outlive the bridge. |
+| **Local administrator access** | Database file permissions (0600), configurable state directory. A local admin can always read SQLite. |
+| **Windows UI automation uncertainty** | Desktop UI runner depends on Codex window state and DPI — may fail silently. |
 
 ## Security Review Focus
 
