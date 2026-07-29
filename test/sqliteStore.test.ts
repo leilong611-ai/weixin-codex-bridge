@@ -335,8 +335,8 @@ describe("SqliteStore", () => {
       accountKey: TEST_ACCOUNT_KEY,
       nextCursor: "cursor-atomic",
       messages: [
-        { messageUid: "batch:1", peerId: "u1", rawJson: "{}", text: "batch1" },
-        { messageUid: "batch:2", peerId: "u1", rawJson: "{}", text: "batch2" },
+        { messageUid: "batch:1", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "batch1", payloadJson: "", payloadVersion: null },
+        { messageUid: "batch:2", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "batch2", payloadJson: "", payloadVersion: null },
       ],
     });
 
@@ -358,8 +358,8 @@ describe("SqliteStore", () => {
       accountKey: TEST_ACCOUNT_KEY,
       nextCursor: "cursor-dup",
       messages: [
-        { messageUid: "batch:1", peerId: "u1", rawJson: "{}", text: "existing" },
-        { messageUid: "batch:2", peerId: "u1", rawJson: "{}", text: "new" },
+        { messageUid: "batch:1", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "existing", payloadJson: "", payloadVersion: null },
+        { messageUid: "batch:2", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "new", payloadJson: "", payloadVersion: null },
       ],
     });
 
@@ -477,11 +477,11 @@ describe("SqliteStore", () => {
 
   // ---- Migration test ----
 
-  it("schema starts at version 3", () => {
-    expect(store.schemaVersion).toBe(3);
+  it("schema starts at version 4", () => {
+    expect(store.schemaVersion).toBe(4);
   });
 
-  it("new database has correct columns for v3 schema", () => {
+  it("new database has correct columns for v4 schema", () => {
     store.insertInboxMessage({ accountKey: "test-key", messageUid: "test:uid", peerId: "test-peer", rawJson: "{}", text: "test" });
 
     // Verify columns exist by accessing them

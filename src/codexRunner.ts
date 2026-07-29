@@ -6,12 +6,23 @@ import type { BridgeConfig } from "./config.js";
 import type { BridgeRunResult, CodexRunOptions } from "./types.js";
 import { BridgeStateStore } from "./stateStore.js";
 import { buildCmdProcessInvocation } from "./windowsCommand.js";
+import { StoragePolicy } from "./storagePolicy.js";
 
 export class CodexRunner {
   private readonly state: BridgeStateStore;
+  private readonly storagePolicy: StoragePolicy;
 
-  constructor(private readonly config: BridgeConfig) {
+  constructor(
+    private readonly config: BridgeConfig,
+    storagePolicy?: StoragePolicy,
+  ) {
     this.state = new BridgeStateStore(config);
+    this.storagePolicy = storagePolicy ?? new StoragePolicy({
+      logLevel: config.logLevel,
+      transcriptEnabled: config.transcriptEnabled,
+      storeFullPrompts: config.storeFullPrompts,
+      retentionDays: config.dataRetentionDays,
+    });
   }
 
   async runExactPrompt(prompt: string, sessionKey: string, options: CodexRunOptions = {}): Promise<BridgeRunResult> {
@@ -23,27 +34,33 @@ export class CodexRunner {
     const requestPath = path.join(runDirectory, "request.json");
     const args = this.buildArgs(prompt, lastMessagePath, options.codexSessionId);
 
-    await writeFile(promptPath, prompt, "utf8");
-    await writeFile(requestPath, `${JSON.stringify({
-      args,
-      codexCmdPath: this.config.codexCmdPath,
-      codexCwd: this.config.codexCwd,
-      createdAt: new Date().toISOString(),
-      promptPath,
-      sessionKey
-    }, null, 2)}\n`, "utf8");
+    // Only write prompt.txt and request.json in full-debug mode for privacy
+    if (this.storagePolicy.keepFullRequestMetadata) {
+      await writeFile(promptPath, prompt, "utf8");
+      await writeFile(requestPath, `${JSON.stringify({
+        args,
+        codexCmdPath: this.config.codexCmdPath,
+        codexCwd: this.config.codexCwd,
+        createdAt: new Date().toISOString(),
+        promptPath,
+        sessionKey,
+      }, null, 2)}\n`, "utf8");
+    }
 
     const result = await this.spawnCodex(args, prompt, stdoutPath, stderrPath);
     const lastMessage = await readOptional(lastMessagePath);
-    const stdout = await readOptional(stdoutPath);
-    const stderr = await readOptional(stderrPath);
+    const runDirName = path.basename(runDirectory);
 
     return {
       lastMessage: lastMessage.trim(),
       ok: result.exitCode === 0,
       runDirectory,
-      stderr,
-      stdout
+      stderr: this.storagePolicy.keepFullRunArtifacts
+        ? (await readOptional(stderrPath)).trim()
+        : `[redacted] run ${runDirName} exit ${result.exitCode ?? "signal"}`,
+      stdout: this.storagePolicy.keepFullRunArtifacts
+        ? (await readOptional(stdoutPath)).trim()
+        : "",
     };
   }
 
@@ -63,12 +80,10 @@ export class CodexRunner {
       }
     }
 
-    // Only add --full-auto if explicitly allowed via env var (default: false)
     if (this.config.allowFullAuto) {
       args.push("--full-auto");
     }
 
-    // Only add --skip-git-repo-check if explicitly allowed (default: false)
     if (this.config.allowSkipGitCheck) {
       args.push("--skip-git-repo-check");
     }
@@ -88,7 +103,7 @@ export class CodexRunner {
       const invocation = buildCmdProcessInvocation(this.config.codexCmdPath, args);
       const child = spawn(invocation.file, invocation.args, {
         cwd: this.config.codexCwd,
-        windowsHide: true
+        windowsHide: true,
       });
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
@@ -100,7 +115,7 @@ export class CodexRunner {
       child.on("close", async (exitCode) => {
         await Promise.all([
           writeFile(stdoutPath, Buffer.concat(stdoutChunks)),
-          writeFile(stderrPath, Buffer.concat(stderrChunks))
+          writeFile(stderrPath, Buffer.concat(stderrChunks)),
         ]);
         resolve({ exitCode });
       });

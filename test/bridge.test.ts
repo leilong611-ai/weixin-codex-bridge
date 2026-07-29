@@ -76,7 +76,7 @@ describe("CodexWeixinBridge", () => {
     await bridge.processMessage(makeTextMessage("失败后要保留"));
 
     await expect(bridgeInternals.state.listFailedTasks(createSessionKey("account", "wx-user"))).resolves.toMatchObject([
-      { prompt: "失败后要保留" }
+      { prompt: expect.stringContaining("失败后要保留") }
     ]);
     expect(sentTexts).toEqual([
       "Codex Desktop 没有成功接收或完成这条消息，桥已继续运行。"

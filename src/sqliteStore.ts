@@ -15,7 +15,7 @@
  * @module
  */
 
-import { mkdirSync, chmodSync, constants } from "node:fs";
+import { mkdirSync, chmodSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
@@ -49,10 +49,12 @@ export interface PersistBatchParams {
 export interface PersistableInboxMessage {
   messageUid: string;
   peerId: string;
+  peerHash: string;
   rawJson: string;
   text: string;
+  payloadJson: string;
+  payloadVersion: number | null;
   createTimeMs?: number;
-  /** If set, message is persisted directly as this status (e.g., 'skipped') */
   statusOverride?: "pending" | "skipped" | "rejected";
 }
 
@@ -117,7 +119,7 @@ export class SqliteStore {
     this.db.exec("PRAGMA busy_timeout = 5000");
 
     // Run migrations
-    const migrationResult = runMigrations(this.db);
+    const migrationResult = runMigrations(this.db, { dbPath: this.dbPath, backupDir: dbDir });
     if (migrationResult.applied.length > 0) {
       this._migrationApplied = true;
       console.log(
@@ -181,8 +183,11 @@ export class SqliteStore {
     accountKey: string;
     messageUid: string;
     peerId: string;
+    peerHash?: string;
     rawJson: string;
     text: string;
+    payloadJson?: string;
+    payloadVersion?: number | null;
     createTimeMs?: number;
     statusOverride?: "skipped" | "rejected";
   }): InboxInsertResult {
@@ -191,15 +196,18 @@ export class SqliteStore {
 
     const result = this.db.prepare(`
       INSERT INTO inbox_messages
-        (account_key, message_uid, peer_id, raw_json, text, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        (account_key, message_uid, peer_id, peer_hash, raw_json, text, payload_json, payload_version, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(account_key, message_uid) DO NOTHING
     `).run(
       params.accountKey,
       params.messageUid,
       params.peerId,
+      params.peerHash ?? "",
       params.rawJson,
       params.text,
+      params.payloadJson ?? "",
+      params.payloadVersion ?? null,
       status,
       now,
       status === "pending" ? null : now,
@@ -236,8 +244,8 @@ export class SqliteStore {
 
       const stmt = this.db.prepare(`
         INSERT INTO inbox_messages
-          (account_key, message_uid, peer_id, raw_json, text, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          (account_key, message_uid, peer_id, peer_hash, raw_json, text, payload_json, payload_version, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(account_key, message_uid) DO NOTHING
       `);
 
@@ -249,8 +257,11 @@ export class SqliteStore {
           params.accountKey,
           msg.messageUid,
           msg.peerId,
+          msg.peerHash,
           msg.rawJson,
           msg.text,
+          msg.payloadJson,
+          msg.payloadVersion,
           status,
           now,
           status === "pending" ? null : now,
@@ -286,15 +297,15 @@ export class SqliteStore {
     return this.leaseManager.claimNext(accountKey, options);
   }
 
-  completeMessage(id: number, leaseToken: string): boolean {
-    return this.leaseManager.completeMessage({ id, leaseToken });
+  completeMessage(id: number, leaseToken: string, scrubEnvelope?: boolean): boolean {
+    return this.leaseManager.completeMessage({ id, leaseToken, scrubEnvelope });
   }
 
   failMessage(
     id: number,
     leaseToken: string,
     error: string,
-    options?: { maxAttempts?: number; errorCategory?: string },
+    options?: { maxAttempts?: number; errorCategory?: string; scrubOnDead?: boolean },
   ): boolean {
     return this.leaseManager.failMessage({
       id,
@@ -302,6 +313,7 @@ export class SqliteStore {
       error,
       maxAttempts: options?.maxAttempts,
       errorCategory: options?.errorCategory,
+      scrubOnDead: options?.scrubOnDead,
     });
   }
 
@@ -324,8 +336,6 @@ export class SqliteStore {
   startHeartbeat(params: { id: number; leaseToken: string; owner?: string }) {
     return this.leaseManager.startHeartbeat(params);
   }
-
-  // ---- Account-scoped queries ------------------------------------------
 
   /**
    * Count pending (pending or failed) messages for a specific account.

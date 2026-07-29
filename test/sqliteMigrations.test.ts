@@ -27,23 +27,23 @@ describe("sqliteMigrations", () => {
     }
   });
 
-  it("migrates from v0 to v3 on fresh database", () => {
+  it("migrates from v0 to v4 on fresh database", () => {
     const result = runMigrations(db);
     expect(result.fromVersion).toBe(0);
-    expect(result.toVersion).toBe(3);
-    expect(result.applied).toEqual([1, 2, 3]);
-    expect(getSchemaVersion(db)).toBe(3);
+    expect(result.toVersion).toBe(4);
+    expect(result.applied).toEqual([1, 2, 3, 4]);
+    expect(getSchemaVersion(db)).toBe(4);
   });
 
   it("is idempotent — running twice does not re-apply", () => {
     runMigrations(db);
     const result = runMigrations(db);
     expect(result.applied).toEqual([]);
-    expect(result.fromVersion).toBe(3);
-    expect(result.toVersion).toBe(3);
+    expect(result.fromVersion).toBe(4);
+    expect(result.toVersion).toBe(4);
   });
 
-  it("creates expected v3 tables and columns", () => {
+  it("creates expected v4 tables and columns", () => {
     runMigrations(db);
 
     // Verify tables exist
@@ -56,7 +56,7 @@ describe("sqliteMigrations", () => {
     expect(tableNames).toContain("failed_tasks");
   });
 
-  it("inbox_messages has correct v3 columns", () => {
+  it("inbox_messages has correct v4 columns", () => {
     runMigrations(db);
 
     const columns = db.prepare("PRAGMA table_info(inbox_messages)").all() as Array<{
@@ -88,6 +88,11 @@ describe("sqliteMigrations", () => {
 
     // v3 columns
     expect(colNames).toContain("error_category");
+
+    // v4 columns
+    expect(colNames).toContain("payload_version");
+    expect(colNames).toContain("payload_json");
+    expect(colNames).toContain("peer_hash");
   });
 
   it("preserves existing data across migrations", () => {
@@ -180,7 +185,13 @@ describe("sqliteMigrations", () => {
     `);
     db.prepare("PRAGMA user_version = 1").run();
 
-    // Drop inbox_messages so v2 ALTER TABLE fails
+    // Migration won't fail because runMigrations only applies v2+ which
+    // starts with ALTER TABLE that will fail. Since we only have v1 schema
+    // version set, and migration only runs on changes, this tests rollback.
+    // For a real test, we need the ALTER to actually fail.
+    // The simplest way: runMigrations on version 0 needs to create v1 first,
+    // then version 2 ALTER TABLE will succeed. But if we start at v1 and
+    // drop the table, the ALTER in v2 fails → rollback.
     db.exec("DROP TABLE inbox_messages");
 
     // Migration should throw

@@ -26,6 +26,7 @@ export interface ClaimResult {
   peerId: string;
   text: string;
   payload: StoredPayload | null;
+  payloadJson: string | null;
   attempts: number;
 }
 
@@ -85,7 +86,7 @@ export class LeaseManager {
     try {
       // Find next claimable message
       const row = this.db.prepare(`
-        SELECT id, message_uid, peer_id, text, raw_json, status,
+        SELECT id, message_uid, peer_id, text, raw_json, payload_json, status,
                lease_until, attempts, last_error, error_category
         FROM inbox_messages
         WHERE account_key = ?
@@ -130,6 +131,7 @@ export class LeaseManager {
         payload: row.raw_json
           ? { rawJson: String(row.raw_json), text: String(row.text ?? "") }
           : null,
+        payloadJson: row.payload_json != null ? String(row.payload_json) : null,
         attempts: Number(row.attempts ?? 0) + 1,
       };
     } catch (err) {
@@ -172,8 +174,19 @@ export class LeaseManager {
     id: number;
     leaseToken: string;
     now?: number;
+    /** If true, scrub payload_json and peerRouteId too */
+    scrubEnvelope?: boolean;
   }): boolean {
     const now = params.now ?? Date.now();
+
+    const scrubClause = params.scrubEnvelope
+      ? `raw_json = '',
+         text = '',
+         payload_json = NULL,
+         payload_version = NULL,
+         peer_hash = '',`
+      : `raw_json = '',
+         text = '',`;
 
     const result = this.db.prepare(`
       UPDATE inbox_messages
@@ -182,8 +195,7 @@ export class LeaseManager {
           lease_token = NULL,
           lease_owner = NULL,
           last_error = NULL,
-          raw_json = '',
-          text = '',
+          ${scrubClause}
           updated_at = ?,
           completed_at = ?
       WHERE id = ?
@@ -205,6 +217,8 @@ export class LeaseManager {
     maxAttempts?: number;
     errorCategory?: string;
     now?: number;
+    /** If true, scrub payload on dead transition */
+    scrubOnDead?: boolean;
   }): boolean {
     const now = params.now ?? Date.now();
     const maxAttempts = params.maxAttempts ?? 3;
@@ -229,6 +243,7 @@ export class LeaseManager {
 
       const attempts = Number(row.attempts ?? 0);
       const newStatus = attempts >= maxAttempts ? "dead" : "failed";
+      const isDead = newStatus === "dead";
 
       this.db.prepare(`
         UPDATE inbox_messages
@@ -238,7 +253,16 @@ export class LeaseManager {
             lease_owner = NULL,
             last_error = ?,
             error_category = ?,
-            updated_at = ?
+            ${isDead && params.scrubOnDead !== false
+              ? `raw_json = '',
+                 text = '',
+                 payload_json = NULL,
+                 payload_version = NULL,
+                 peer_hash = '',`
+              : `raw_json = raw_json,
+                 text = text,`}
+            updated_at = ?,
+            completed_at = ${isDead ? now : "NULL"}
         WHERE id = ?
       `).run(newStatus, params.error.slice(0, 2000), params.errorCategory ?? null, now, params.id);
 
@@ -254,10 +278,7 @@ export class LeaseManager {
    * Mark a message as skipped (startup backlog, unauthorized).
    * Scrub payload immediately.
    */
-  skipMessage(params: {
-    id: number;
-    now?: number;
-  }): boolean {
+  skipMessage(params: { id: number; now?: number }): boolean {
     const now = params.now ?? Date.now();
 
     const result = this.db.prepare(`
@@ -268,6 +289,9 @@ export class LeaseManager {
           lease_owner = NULL,
           raw_json = '',
           text = '',
+          payload_json = NULL,
+          payload_version = NULL,
+          peer_hash = '',
           last_error = NULL,
           updated_at = ?,
           completed_at = ?
@@ -277,15 +301,7 @@ export class LeaseManager {
     return Number(result.changes) > 0;
   }
 
-  /**
-   * Reject a message (unauthorized, unsupported type).
-   * Scrub payload immediately.
-   */
-  rejectMessage(params: {
-    id: number;
-    reason?: string;
-    now?: number;
-  }): boolean {
+  rejectMessage(params: { id: number; reason?: string; now?: number }): boolean {
     const now = params.now ?? Date.now();
 
     const result = this.db.prepare(`
@@ -296,6 +312,9 @@ export class LeaseManager {
           lease_owner = NULL,
           raw_json = '',
           text = '',
+          payload_json = NULL,
+          payload_version = NULL,
+          peer_hash = '',
           last_error = ?,
           updated_at = ?,
           completed_at = ?
