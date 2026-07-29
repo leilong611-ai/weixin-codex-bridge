@@ -1,202 +1,236 @@
 # Weixin Codex Bridge
 
-[![public-check](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml)
+[![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-A standalone bridge from Weixin to Codex without OpenClaw routing.
-
-It talks to the Weixin bot HTTP API directly for QR login, message polling, replies, and typing state, then uses `acpx` to map each Weixin user to an isolated Codex session.
+A standalone bridge that forwards WeChat messages to a local Codex Desktop or CLI instance with security and reliability guards.
 
 Chinese version: [README.md](./README.md)
 
+---
+
+## What problem does it solve?
+
+Codex runs on your local machine, but the high-frequency communication channel is often WeChat.
+
+This project creates a well-bounded bridge layer between the two:
+
+- Authenticate via WeChat QR login
+- Authorize users via allowlist and role system (owner / allowed / readonly)
+- Isolate each WeChat peer to a dedicated session key
+- Route authorized text messages to Codex Desktop or Codex CLI
+- Send execution results back to WeChat with safe reply splitting
+- Persist messages in a SQLite durable queue to prevent silent loss on restart
+- Enforce default security restrictions on the console, logs, workspace, and local data
+
 ## Architecture
 
-```mermaid
-flowchart LR
-  A["Weixin Account"] <--> B["Weixin Bot API"]
-  B <--> C["Standalone Bridge"]
-  C <--> D["acpx"]
-  D <--> E["Codex CLI"]
+```
+WeChat User → WeChat Bot API → Authorization → SQLite Durable Inbox
+                                              → Session Scheduler
+                                              → Codex Desktop / CLI
+                                              → Response → WeChat
 ```
 
-Target flow:
+**Trust boundaries:**
 
-`Weixin -> standalone bridge -> acpx -> Codex`
+| Boundary | Trust Level |
+|----------|-------------|
+| WeChat user | **Untrusted** — requires role-based authorization |
+| WeChat input | **Untrusted** — external input, possible injection vector |
+| Codex output | **May contain sensitive content** — redacted in logs and storage |
+| SQLite data | Local private directory, periodic cleanup, payload scrubbing |
 
-This repo does not rely on OpenClaw channel routing, bindings, or agent dispatching.
+## Default Security Policy
 
-## Screenshots
+Default-deny and least-privilege:
 
-### 1. Login flow
+| Capability | Default |
+|------------|---------|
+| Unauthorized WeChat users | Rejected with generic refusal |
+| Codex `--full-auto` | Disabled |
+| Codex `--skip-git-repo-check` | Disabled |
+| Local console | Disabled (needs explicit enable + token) |
+| Full transcript storage | Disabled |
+| Store full failed prompts | Disabled |
+| Log level | `minimal` (no message content) |
+| Codex workspace | Must pass sandbox path validation |
 
-![login flow](./assets/login-flow.svg)
+Even with an allowlist configured, do not use `$HOME`, `.ssh`, `.codex`, browser data directories, or primary repository roots as the Codex workspace.
 
-The public repo uses a sanitized illustrative screenshot here. Real QR codes, account IDs, and local paths are intentionally excluded from the published materials.
+## Capabilities
 
-### 2. Doctor output
+- QR code login for WeChat bot accounts
+- Owner / allowed / readonly role authorization with command-level access control
+- Unknown users rejected by default — never leak internal state
+- Deterministic session key per (account, peer) — no cross-user leakage
+- Codex Desktop automation (primary delivery mode)
+- Codex CLI mode (optional, with Desktop fallback on failure)
+- Sandbox workspace validation
+- SQLite WAL durable message queue
+- Account-scoped message UID deduplication (`weixin:<hash>:msg:<id>`)
+- Lease token + heartbeat for safe long-running tasks
+- Crash recovery — recover expired leases before contacting WeChat API
+- Authenticated local console with CSRF/Origin/Host checks
+- Log redaction (tokens, account IDs, paths, emails, phone numbers)
+- Data retention cleanup (default 7 days)
+- npm package content verification in CI
 
-![doctor output](./assets/doctor-output.svg)
+## Message Reliability
 
-Use `doctor` before login to verify workspace, `acpx`, and the saved runtime state.
+The bridge uses a SQLite Durable Inbox to manage WeChat messages.
 
-### 3. Message round trip
+**Normal flow:**
 
-![message roundtrip](./assets/message-roundtrip.svg)
+1. Fetch messages from WeChat API
+2. Batch-write to inbox + update cursor atomically (`BEGIN IMMEDIATE` / `COMMIT`)
+3. Worker claims next pending message, receives a unique lease token
+4. Heartbeat renews lease every 30s during execution
+5. Success → mark completed, auto-scrub payload (raw_json, text cleared)
+6. Failure (retryable) → mark failed, retain minimal context for retry
+7. Failure (exhausted) → mark dead, payload scrubbed
+8. Crash → on restart, recover expired leases, drain pending before contacting WeChat
 
-After a text message arrives from Weixin, the bridge sends typing, prompts the matching Codex session, and returns a plain-text reply.
+**Deduplication:**
 
-## Features
+- Message UID = `weixin:<account_hash>:msg:<message_id>` or `weixin:<account_hash>:hash:<body_hash>`
+- Same message from same account always produces the same UID
+- `ON CONFLICT(account_key, message_uid) DO NOTHING` — duplicate fetch does not duplicate execution
+- Different accounts never conflict even with the same message_id
 
-- QR login for Weixin bot accounts
-- Direct-message text chat
-- One persistent Codex session per Weixin user
-- Typing state support
-- `/new` and `/reset` to reset the current user's session
-- Local runtime state under `.local/`
+**Safeguards:**
 
-## Why This Project Matters
+- SQLite errors (disk full, corruption, I/O) throw — never silently treated as "duplicate"
+- Wrong lease token cannot complete/fail a message
+- Old worker cannot overwrite new worker's state
+- All state transitions verify `id + lease_token` match
 
-This repository is not trying to be "just another chatbot." It addresses a more specific maintainer workflow problem:
+## Data Storage and Privacy
 
-- many Chinese-speaking users already coordinate day-to-day work in WeChat
-- Codex is strong at coding and maintainer workflows, but it does not naturally live inside WeChat
-- OpenClaw routing is powerful, but not every deployment needs the full routing and agent-dispatch layer
+Database location: `{state_root}/sqlite/bridge.db` (mode 0600, directory 0700).
 
-That is why this project takes a narrower path: `Weixin -> standalone bridge -> Codex`. The value is practical rather than theoretical: it connects a high-frequency communication channel to an executable Codex workflow while keeping deployment and debugging boundaries simple.
+**Data lifecycle:**
 
-## Current Scope
+| Phase | Stored Content |
+|-------|----------------|
+| pending / processing | Minimal fields for processing; raw_json only if `full-debug` log level |
+| completed | Audit-only: message_uid, account_key, peer_hash, status, timestamps |
+| skipped / rejected | Same as completed — no payload |
+| failed | Text summary (max 2000 chars), no raw_json |
+| dead | Same as failed |
+| failed_tasks table | Cleared on cleanup; prompt and error (redacted) |
 
-Included in v0.1:
+**Not stored by default:**
 
-- Direct-message text only
-- Single-agent routing
-- Plain-text replies
+- Full WeChat API response (raw_json)
+- Full message text content (in non-debug modes)
+- Tokens, cookies, credentials, or session secrets
+- Real peer IDs in the database (stored as hashes where appropriate)
 
-Not included yet:
+## User Roles
 
-- Group chat routing
-- Media upload and download
-- Multi-agent dispatch
+| Role | Capability |
+|------|------------|
+| owner | All: normal messages, management commands, diagnostics, model switching |
+| allowed | Normal messages to own session only, public status/help commands |
+| readonly | Public status / help commands — never triggers Codex execution |
+| unknown | Rejected with generic refusal — no information leakage |
 
 ## Requirements
 
-- Node.js `>= 22`
-- Local `codex` CLI installed and already authenticated
-- Network access to the Weixin bot API and npm
+- Node.js 22+ (uses `node:sqlite`)
+- Windows 10/11 for Codex Desktop automation
+- Installed and logged-in Codex Desktop, or Codex CLI
+- WeChat / OpenClaw login state (from `npx openclaw-weixin-cli login`)
+- Dedicated, isolated Codex workspace directory
 
 ## Quick Start
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
-npm install
+npm ci
+npm run build
 ```
 
-Verify `acpx` can see your target workspace:
+**Note:** The project does not read `.env` automatically. Export variables via shell or process manager.
+
+### Minimal Security Configuration (Linux / macOS)
 
 ```bash
-node src/cli.mjs doctor --workspace "/path/to/your/workspace"
+export CODEX_WEIXIN_OWNER_PEER_IDS=wxid_example_owner
+export CODEX_WEIXIN_DEFAULT_DENY=true
+export CODEX_WEIXIN_CWD=/absolute/path/to/sandbox/project
+export CODEX_WEIXIN_SANDBOX_ROOT=/absolute/path/to/sandbox
+export CODEX_WEIXIN_EXECUTION_MODE=restricted
+export CODEX_WEIXIN_ALLOW_FULL_AUTO=false
+export CODEX_WEIXIN_ALLOW_SKIP_GIT_CHECK=false
+export CODEX_WEIXIN_CONSOLE_ENABLED=false
+export CODEX_WEIXIN_LOG_LEVEL=minimal
+export CODEX_WEIXIN_TRANSCRIPT_ENABLED=false
+export CODEX_WEIXIN_STORE_FULL_PROMPTS=false
+export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 ```
 
-Link a Weixin account:
+### Start the Bridge
 
 ```bash
-node src/cli.mjs login --workspace "/path/to/your/workspace"
+npm run build
+npm start -- doctor
+npm start -- login
+npm start -- serve
 ```
 
-During login, the bridge outputs:
-
-- A terminal QR code
-- A local QR image at `.local/login-qr.png`
-
-Start the bridge:
+## Tests
 
 ```bash
-node src/cli.mjs serve
-```
-
-Or do login + serve in one step:
-
-```bash
-node src/cli.mjs start --workspace "/path/to/your/workspace"
-```
-
-## Useful Commands
-
-```bash
-node src/cli.mjs doctor
-node src/cli.mjs logout
+npm ci
+npm run build
+npm test -- --run
 npm run public-check
+npm pack --dry-run --json
 ```
 
-## Repository Layout
+27 test files, 250+ tests covering: SQLite operations, lease management, migrations, message identity, payload privacy, data retention, bridge routing, authorization, session isolation, console server, and desktop automation.
 
-```text
-src/
-  cli.mjs
-  login.mjs
-  bridge.mjs
-  weixin-api.mjs
-  codex-runner.mjs
-  text.mjs
-  state.mjs
-  config.mjs
-  log.mjs
-  paths.mjs
-docs/
-  build-process.md
-  configuration.md
-  faq.md
-  privacy-and-publish-checklist.md
-scripts/
-  public-check.sh
-```
+## Known Limitations
 
-## Configuration and FAQ
+- Codex Desktop automation is primarily designed for Windows
+- UI automation may be affected by window state, DPI scaling, and Codex Desktop updates
+- WeChat / OpenClaw API changes may affect message fetching
+- High-risk execution mode transfers additional risk to the user
+- This project **cannot prevent** prompt injection attacks
+- This project **cannot guarantee** the safety of every command Codex generates
+- Git branches, code review, and backups are still recommended for production repositories
 
-- [docs/configuration.md](./docs/configuration.md)
-- [docs/faq.md](./docs/faq.md)
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
-- [SECURITY.md](./SECURITY.md)
-- [CHANGELOG.md](./CHANGELOG.md)
+## Security Recommendations
 
-## Privacy and Publishing
+1. Run the bridge under a dedicated, non-admin system account
+2. Always use a dedicated sandbox directory as the Codex workspace
+3. Never use `$HOME`, `.ssh`, `.codex`, browser data, or production repos as workspace
+4. Keep `--full-auto` disabled unless the environment is fully isolated
+5. Run periodic data cleanup (auto-cleanup runs every 7 days by default)
+6. Keep Node.js, Codex, and all dependencies updated
+7. Review Codex-generated diffs before merging
+8. Never expose the local console to a network (LAN or WAN)
 
-- `.local/` is ignored and must never be committed
-- Run `npm run public-check` before publishing changes
-- See [docs/privacy-and-publish-checklist.md](./docs/privacy-and-publish-checklist.md) for the release checklist
+## Documents
 
-## Why It Benefits From Stronger Security Review
-
-This project sits on a sensitive boundary: upstream it handles WeChat login state and messages, and downstream it drives local Codex sessions and runtime state. The meaningful risks are not ordinary UI bugs, but mistakes such as:
-
-- session-isolation failures that leak context across users
-- diagnostic output or logs exposing secrets
-- routing mistakes that send one user's content into another user's Codex session
-- accidental publication of `.local/` state, QR images, or account identifiers
-
-That is why the repository is a strong fit for maintainer automation and deeper security review, not just feature development.
-
-## Roadmap
-
-The near-term goal is not to add features blindly, but to make the bridge more reliable as a maintainable OSS project:
-
-- strengthen validation around session isolation and reset flows
-- improve log redaction and diagnostic boundaries
-- add more stable maintainer checks and pre-release automation
-- evaluate media-message support and group-chat allowlisting without breaking the standalone architecture
+- [SECURITY.md](./SECURITY.md) — threat model, vulnerability reporting
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — development guide, PR checklist
+- [CHANGELOG.md](./CHANGELOG.md) — version history
+- [LICENSE](./LICENSE) — MIT
 
 ## References
 
-- Tencent Weixin OpenClaw installer: <https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin-cli>
-- Tencent Weixin OpenClaw plugin: <https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin>
-- OpenClaw ACP Agents: <https://docs.openclaw.ai/tools/acp-agents>
-- OpenClaw ACP CLI: <https://docs.openclaw.ai/cli/acp>
-- ACPX: <https://www.npmjs.com/package/acpx>
+- [WeChat OpenClaw CLI](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin-cli)
+- [WeChat OpenClaw Plugin](https://www.npmjs.com/package/@tencent-weixin/openclaw-weixin)
+- [OpenClaw ACP Agents](https://docs.openclaw.ai/tools/acp-agents)
+- [ACPX](https://www.npmjs.com/package/acpx)
 
-## Notes
+---
 
-This repository focuses on the standalone "Weixin directly to Codex" approach. If you want to reuse OpenClaw routing itself, that is a different architecture and intentionally out of scope here.
+**If this project helped you, please give it a Star ⭐**
 
-## License
-
-MIT
+[Report Bug](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Request Feature](https://github.com/leilong611-ai/weixin-codex-bridge/issues)

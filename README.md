@@ -1,157 +1,278 @@
-<div align="center">
-
 # Weixin Codex Bridge
 
-**不依赖 OpenClaw routing 的微信到 Codex standalone bridge**
+一个将微信消息安全转发到本地 Codex Desktop 或 Codex CLI 的独立桥接器。
 
-[![public-check](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/public-check.yml)
-[![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+适合想通过微信触发个人 Codex 工作流，又需要用户授权、会话隔离、沙箱限制、消息持久化和本地数据控制的用户。
 
-扫码登录 · 消息转发 · 会话隔离 · Typing 同步
-
-English version: [README.en.md](./README.en.md)
-
-</div>
+> **重要说明：** 微信消息属于外部不可信输入。项目默认拒绝未授权用户，默认关闭高权限 Codex 参数和本地控制台。但使用者仍需为 Codex 配置独立工作目录，并理解本地自动执行带来的风险。
 
 ---
 
-它直接调用微信 bot HTTP API 完成扫码登录、收发消息和 typing 状态，再通过 `acpx` 把每个微信用户绑定到一个独立的 Codex 会话。
+[![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+
+English: [README.en.md](./README.en.md)
+
+---
+
+## 项目解决什么问题
+
+Codex 通常运行在电脑本地，而高频沟通入口往往在微信中。
+
+本项目在两者之间建立一个边界明确的桥接层：
+
+- 从已登录的微信机器人账号读取消息
+- 对微信用户进行白名单和角色鉴权
+- 为不同微信会话建立隔离的本地 session
+- 将允许的文本消息交给 Codex Desktop 或 Codex CLI
+- 将执行结果安全回复到微信
+- 使用 SQLite 持久队列避免消息因程序重启而静默丢失
+- 对控制台、日志、工作目录和本地数据实施默认安全限制
 
 ## 架构
 
 ```mermaid
 flowchart LR
-  A["微信号"] <--> B["微信 Bot API"]
-  B <--> C["Standalone Bridge"]
-  C <--> D["acpx"]
-  D <--> E["Codex CLI"]
+    A[微信用户] --> B[微信机器人 API]
+    B --> C[授权与角色检查]
+    C --> D[SQLite Durable Inbox]
+    D --> E[Session Scheduler]
+    E --> F[Codex Desktop / CLI]
+    F --> G[安全回复处理]
+    G --> B
+
+    C --> H[拒绝 / 只读响应]
+    D --> I[去重、租约、重试、崩溃恢复]
 ```
 
-目标链路：`微信 -> standalone bridge -> acpx -> Codex`
+**信任边界：**
 
-不走 OpenClaw 的 channel routing、bindings 或 agent 分发。
+| 边界 | 信任等级 |
+|------|----------|
+| 微信用户 | **不可信** — 需要授权检查 |
+| 微信消息 | **不可信** — 外部输入 |
+| Codex 输出 | **可能含敏感内容** — 需脱敏 |
+| SQLite 数据 | 只保存于本地私有状态目录，定期清理 |
 
-## 截图
+## 默认安全策略
 
-### 1. 登录流程
+项目采用默认拒绝和最小权限原则：
 
-![login flow](./assets/login-flow.svg)
+| 能力 | 默认状态 |
+|------|----------|
+| 未授权微信用户 | 拒绝 |
+| `--full-auto` | 关闭 |
+| `--skip-git-repo-check` | 关闭 |
+| 本地控制台 | 关闭 |
+| 完整 transcript | 关闭 |
+| 保存完整失败 prompt | 关闭 |
+| 日志等级 | `minimal` |
+| Codex 工作目录 | 必须通过沙箱校验 |
 
-扫码登录时，bridge 会同时输出终端二维码并保存 `.local/login-qr.png`。
+即使启用了白名单，也不建议将个人主目录、`.ssh`、`.codex`、浏览器数据目录或主力代码仓库根目录直接作为 Codex workspace。
 
-### 2. 诊断输出
+## 主要能力
 
-![doctor output](./assets/doctor-output.svg)
+- 微信二维码登录与账号读取
+- owner / allowed / readonly 角色授权
+- 未知用户默认拒绝
+- 每个微信会话独立 session key
+- Codex Desktop 自动化
+- Codex CLI 可选模式
+- 工作目录安全检查
+- SQLite WAL 持久消息队列
+- account-scoped message UID 幂等去重
+- lease token 与心跳机制
+- 崩溃恢复和失败重试
+- 本地控制台认证
+- 日志脱敏和数据保留期限
+- Windows 与 Linux CI
+- npm 包内容验证
 
-`doctor` 用来在登录前检查工作区、`acpx` 和当前本地运行态。
+## 消息可靠性
 
-### 3. 消息往返
+桥接器使用 SQLite Durable Inbox 管理微信消息。
 
-![message roundtrip](./assets/message-roundtrip.svg)
+**正常流程：**
 
-收到微信文本后，bridge 会先发 typing，再进入对应的 Codex 会话，最后把纯文本回复拆块送回微信。
+1. 拉取微信消息
+2. 在一个事务中批量写入 inbox + 更新 cursor（原子提交）
+3. worker 领取消息并获得 lease token
+4. 运行期间通过心跳续租
+5. 成功后标记 completed，payload 自动清除
+6. 失败后进入 retry 或 dead 状态
+7. 进程重启时优先恢复 lease 已过期的消息，再连接微信 API
 
-## 功能
+**去重与隔离：**
 
-- 微信扫码登录
-- 私聊文本消息收发
-- 每个微信用户一个持久 Codex 会话
-- typing 状态同步
-- `/new` 和 `/reset` 重置当前用户会话
-- 本地状态保存在 `.local/`
+- message UID 包含 account hash（`weixin:<hash>:msg:<id>`），不同账号不会冲突
+- 重复拉取不会重复执行 Codex
+- SQLite 唯一键冲突安全处理（`ON CONFLICT DO NOTHING`），不吞没其他错误
 
-## 为什么这个项目值得做
+**限制：**
 
-这个仓库解决的不是“再做一个聊天机器人”，而是一个更具体的维护问题：
+系统通过幂等 UID、租约和状态条件更新尽量避免重复执行，但在不可控的外部系统故障场景中，调用方仍应尽可能使用幂等操作。
 
-- 很多中文用户的日常协作入口就是微信
-- Codex 适合做代码和维护工作流，但默认不在微信里工作
-- OpenClaw routing 很强，但并不是所有场景都需要整套 routing 和 agent 分发
+## 数据存储与隐私
 
-这个项目因此选择了一条更窄但更实用的路线：只做 `微信 -> standalone bridge -> Codex`。它的价值在于把一个真实使用频率很高的沟通入口，接到可执行的 Codex 工作流上，同时保持部署和调试边界尽量简单。
+SQLite 数据库默认保存在配置的本地状态目录。
 
-## 当前范围
+**数据生命周期：**
 
-| 已覆盖 | 暂未覆盖 |
-|--------|---------|
-| 私聊文本 | 群聊路由 |
-| 单 agent | 图片、视频、文件上传下载 |
-| 纯文本回复 | 多 agent 分发 |
+| 阶段 | 存储内容 |
+|------|----------|
+| pending / processing | 处理所需非敏感内容（受日志等级控制） |
+| completed | 只保留最小审计字段（message_uid, status, timestamps） |
+| skipped / rejected | 无 payload |
+| failed / dead | 只保留失败摘要 |
+| full-debug 模式 | 保存更多信息，但仅限隔离环境短期使用 |
+
+**默认不长期保存：**
+
+- 完整微信消息原文
+- 完整 Codex transcript
+- 完整失败 prompt
+- token、cookie 或凭据
+
+## 本地控制台
+
+- 默认关闭
+- 需要 Bearer token + Origin / Host / CSRF 校验
+- 不建议暴露到局域网或公网
+- 反向代理不能替代本项目认证
+
+## 用户角色
+
+| 角色 | 能力 |
+|------|------|
+| owner | 普通消息、管理命令、状态和维护功能 |
+| allowed | 只能向自己的会话发送普通消息 |
+| readonly | 只能查看允许公开的只读状态 |
+| unknown | 默认拒绝 |
 
 ## 环境要求
 
-- Node.js `>= 22`
-- 本机已安装并登录 `codex`
-- 网络可访问微信 bot API 和 npm
+- Node.js 22+
+- Windows 10/11：使用 Codex Desktop 自动化
+- 已安装并登录 Codex Desktop，或已安装 Codex CLI
+- 已存在可读取的微信/OpenClaw 登录态
+- 一个专用、隔离的 Codex workspace
 
 ## 快速开始
 
 ```bash
 git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
-npm install
+npm ci
+npm run build
 ```
 
-先确认 `acpx` 能找到你的工作区：
+复制配置（注意：项目不会自动读取 `.env`，需要通过 shell 或进程管理器导出环境变量）：
 
 ```bash
-node src/cli.mjs doctor --workspace "/path/to/your/workspace"
+cp .env.example .env.local
+# 然后导出环境变量或通过进程管理器注入
+```
+
+### 最小安全配置
+
+```bash
+# 微信管理员（至少设置一个）
+export CODEX_WEIXIN_OWNER_PEER_IDS=wxid_example_owner
+export CODEX_WEIXIN_DEFAULT_DENY=true
+
+# Codex 工作目录（必须隔离）
+export CODEX_WEIXIN_CWD=/absolute/path/to/sandbox/project
+export CODEX_WEIXIN_SANDBOX_ROOT=/absolute/path/to/sandbox
+
+# 执行模式
+export CODEX_WEIXIN_EXECUTION_MODE=restricted
+export CODEX_WEIXIN_ALLOW_FULL_AUTO=false
+export CODEX_WEIXIN_ALLOW_SKIP_GIT_CHECK=false
+
+# 控制台（默认关闭）
+export CODEX_WEIXIN_CONSOLE_ENABLED=false
+
+# 隐私
+export CODEX_WEIXIN_LOG_LEVEL=minimal
+export CODEX_WEIXIN_TRANSCRIPT_ENABLED=false
+export CODEX_WEIXIN_STORE_FULL_PROMPTS=false
+export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
+```
+
+### 启动
+
+先确认环境和登录态：
+
+```bash
+npm run build
+npm start -- doctor
 ```
 
 扫码登录：
 
 ```bash
-node src/cli.mjs login --workspace "/path/to/your/workspace"
+npm start -- login
 ```
 
-启动 bridge：
+启动桥接器：
 
 ```bash
-node src/cli.mjs serve
+npm start -- serve
 ```
 
-## 常用命令
+## 测试
 
 ```bash
-node src/cli.mjs doctor    # 环境检查
-node src/cli.mjs logout    # 登出
-npm run public-check       # 发布前检查
+npm ci
+npm run build
+npm test -- --run
+npm run public-check
+npm pack --dry-run --json
 ```
 
-## 配置与 Q&A
+测试覆盖：
 
-- [docs/configuration.md](./docs/configuration.md)
-- [docs/faq.md](./docs/faq.md)
-- [CONTRIBUTING.md](./CONTRIBUTING.md)
-- [SECURITY.md](./SECURITY.md)
-- [CHANGELOG.md](./CHANGELOG.md)
+| 测试组 | 覆盖内容 |
+|--------|----------|
+| sqliteStore | 插入/去重/领取/完成/失败/批事务/游标/回收/去重 |
+| leaseManager | 租约领取/心跳续租/完成/失败/跳过/拒绝/恢复 |
+| sqliteMigrations | 空库初始化/幂等/v1→v3升级/版本号/回滚 |
+| messageIdentity | account hash/peer hash/message UID 稳定性/跨账号隔离 |
+| messagePayload | payload 准备/角色过滤/内容清除/大小限制 |
+| dataRetention | 过期数据清理/估计/WAL checkpoint/payload 残留清除 |
+| bridge | 消息处理路由/Desktop 失败/CLI 回退/长回复拆分/并行/会话隔离 |
+| auth | 角色解析/命令访问/启动守卫 |
+| sessionIsolation | session key 确定性/跨用户隔离 |
 
-## 隐私与发布
+## 已知限制
 
-- `.local/` 已加入 `.gitignore`，token、账号信息不进仓库
-- 发布前运行 `npm run public-check`
-- 详见 [docs/privacy-and-publish-checklist.md](./docs/privacy-and-publish-checklist.md)
+- Codex Desktop 自动化目前主要面向 Windows
+- UI 自动化可能受窗口状态、DPI 和 Codex Desktop 更新影响
+- 微信/OpenClaw 上游接口变化可能影响消息拉取
+- 高风险执行模式需要使用者自行承担额外风险
+- 本项目**不能消除** prompt injection
+- 本项目**不能保证** Codex 生成的每条命令都是安全的
+- 对重要仓库仍建议使用 Git 分支、代码审查和备份
 
-## 为什么它需要更强的安全审查
+## 安全建议
 
-这个项目位于一个比较敏感的边界上：上游是微信消息和登录态，下游是本地 Codex 会话与运行时状态。真正重要的风险不是普通 UI bug，而是：
+1. 使用独立系统账号运行桥接器
+2. 使用专用 sandbox 目录
+3. 不要把主目录、.ssh、.codex 作为 workspace
+4. 不要开启 `full-auto`，除非环境已隔离
+5. 定期清理 SQLite 数据（默认每 7 天自动清理）
+6. 定期更新 Node.js、Codex 和依赖
+7. 对生成的代码使用 Git diff 和 PR 审查
+8. 不要将本地控制台暴露到公网
 
-- 会话隔离错误导致跨用户串话
-- 调试输出或日志泄露凭据
-- 消息路由错误把一个用户的内容发到另一个用户会话
-- 发布时误带 `.local/` 状态、二维码或账号信息
+## 相关文档
 
-这也是为什么这个仓库适合做更严格的维护自动化和安全审查，而不只是功能开发。
-
-## Roadmap
-
-近期维护重点不是盲目扩功能，而是先把桥接能力做稳：
-
-- 完善会话隔离和重置路径的验证
-- 增强日志脱敏和诊断输出边界
-- 增加更稳定的维护检查与发布前自动化
-- 在保持 standalone 架构前提下，评估媒体消息和群聊白名单支持
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — 贡献指南
+- [SECURITY.md](./SECURITY.md) — 安全策略与威胁模型
+- [CHANGELOG.md](./CHANGELOG.md) — 版本变更
+- [LICENSE](./LICENSE) — MIT 许可
 
 ## 参考资料
 
@@ -162,10 +283,6 @@ npm run public-check       # 发布前检查
 
 ---
 
-<div align="center">
-
 **如果这个项目帮到了你，请给个 Star ⭐**
 
-[Report Bug](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Request Feature](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Discussions](https://github.com/leilong611-ai/weixin-codex-bridge/discussions)
-
-</div>
+[Report Bug](https://github.com/leilong611-ai/weixin-codex-bridge/issues) · [Request Feature](https://github.com/leilong611-ai/weixin-codex-bridge/issues)

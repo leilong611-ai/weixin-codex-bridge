@@ -1,68 +1,127 @@
 # Security Policy
 
-`weixin-codex-bridge` sits between WeChat, local runtime state, and Codex-driven workflows. That makes session boundaries, credential handling, and log hygiene core security concerns rather than secondary cleanup work.
+`weixin-codex-bridge` sits between WeChat, local runtime state, and Codex-driven workflows. Session boundaries, credential handling, data privacy, and code execution safety are core security concerns.
 
-## Security Scope
+## Threat Model
 
-The current security-sensitive areas are:
+### Trust Boundaries
 
-- WeChat login state stored in `.local/account.json`
-- local runtime state stored in `.local/runtime.json`
-- per-user Codex session isolation
-- message routing between WeChat and Codex
-- local logs and diagnostic output
+```
+[WeChat User — UNTRUSTED]
+    ↓ WeChat Bot API
+[Bridge Process — TRUSTED but audited]
+    ↓ Authorization Check
+[SQLite Inbox — LOCAL, PRIVATE]
+    ↓ Session Scheduler
+[Codex Desktop / CLI — LOCAL EXECUTION]
+    ↓ Output
+[WeChat Reply — REDACTED]
+```
 
-## Primary Risks
+### Assets
 
-The project is designed to reduce the following classes of mistakes:
+- WeChat bot token and login session
+- SQLite database with message history
+- Codex workspace files and generated code
+- Local console session
 
-- credential leakage through committed files, screenshots, or logs
-- cross-user session leakage caused by incorrect session mapping
-- unsafe diagnostic output that exposes bot tokens, account IDs, or personal data
-- message routing mistakes that send one user's content into another user's Codex session
+### Attackers
+
+| Attacker | Capability |
+|----------|------------|
+| Unauthorized WeChat user | Can send any message to the bot |
+| Authorized malicious user | Can send commands to Codex |
+| Network attacker | Could intercept WeChat API traffic (mitigated by HTTPS) |
+| Local process | Could read SQLite files (mitigated by file permissions) |
+
+### Threats and Controls
+
+| Threat | Control |
+|--------|---------|
+| Unauthorized user triggers Codex | Default-deny allowlist, role-based access |
+| Prompt injection via WeChat | Workspace isolation, restricted execution mode |
+| SQLite data leakage | File permissions (0600), periodic cleanup, payload scrubbing on completion |
+| Cross-user session leakage | Deterministic per-account session keys, account-isolated queries |
+| Log/console leaks credentials | Redaction rules for tokens, accounts, paths, emails, phones |
+| Duplicate Codex execution | Account-scoped UID dedup, lease tokens with state-conditioned updates |
+| Crash loses messages | SQLite WAL, transactional batch persistence, crash recovery |
+| npm package leaks local data | `files` whitelist in package.json, public-check CI, pack validation |
 
 ## Current Protections
 
-- local state is stored under `.local/` and excluded from Git
-- `public-check` scans the repository for common sensitive patterns before publishing
-- each WeChat user is mapped to a stable, isolated Codex session name
-- `doctor` output is designed for environment checks and should not expose raw secrets
+### Authorization
+
+- owner / allowed / readonly / unknown role system
+- Default-deny: unknown users receive generic refusal — no internal state leaked
+- Command-level access control (owner-only commands, public status commands)
+- Startup guard: refuses to start with no owners configured (unless dev mode)
+
+### Workspace Security
+
+- Sandbox root validation — Codex workspace must be within allowed tree
+- `--full-auto` and `--skip-git-repo-check` disabled by default
+- Execution mode: "restricted" (default) enforces all checks; "high-risk" bypasses (not recommended)
+
+### SQLite Durable Inbox
+
+- WAL mode for crash-safe concurrent access
+- Transactional batch writes: messages + cursor in one atomic commit
+- Account-scoped message UIDs prevent cross-account ID collision
+- ON CONFLICT DO NOTHING for dedup; other SQLite errors propagate (no silent swallowing)
+- Lease tokens for safe state transitions — complete/fail requires matching token
+- Heartbeat renewal for long-running tasks
+- Leases expire and can be recovered on restart
+- Payload scrubbing on completion/skip/reject — no residual PII
+
+### Privacy
+
+- `minimal` log level by default — no message content in logs
+- Payload per role: unauthorized users never store raw_json or text
+- Data retention cleanup (default 7 days)
+- Log redaction for tokens, account IDs, paths, emails, phone numbers
+- Database file permissions: 0600 (POSIX), directory: 0700
+- Files whitelist in package.json prevents accidental publication of sensitive files
+
+### Console Security
+
+- Disabled by default
+- Bearer token authentication
+- Origin / Host header validation
+- CSRF token validation
+- Body size limit
+- Only listens on 127.0.0.1
 
 ## Reporting a Vulnerability
 
-Please do not open a public GitHub issue for suspected credential exposure, session-mixing bugs, or other security-sensitive findings.
+Please do not open a public GitHub issue for suspected security vulnerabilities.
 
 Instead:
 
 1. Prepare a minimal reproduction without real credentials
 2. Describe impact, affected files, and expected fix direction
-3. Send the report through a private channel before public disclosure
+3. Send the report through a private channel (email or private repository)
 
-If a bug could expose user messages, login state, or session data across users, treat it as a security issue even if the root cause looks like an ordinary logic bug.
+**Do not include in any report:**
+- Real `botToken` values
+- Real WeChat account IDs, cookie values, or QR codes
+- Real `.local/` or SQLite database files
+- Logs with unredacted user content
 
-## Safe Disclosure Rules
+**Do include:**
+- Placeholder values (`/path/to/workspace`, `example-user-id`, `example-bot-token`)
+- The bridge version and commit hash
+- Steps to reproduce
+- Expected vs actual behavior
 
-When reporting or reproducing a security issue, never include:
-
-- real `botToken` values
-- real WeChat account IDs
-- QR codes or login images
-- raw `.local/` files
-- logs with unredacted user content unless strictly necessary
-
-Use placeholders such as:
-
-- `/path/to/workspace`
-- `example-user-id`
-- `example-bot-token`
+If a bug could expose user messages, login state, session data, or local files across users, treat it as a security issue even if the root cause looks like an ordinary logic bug.
 
 ## Security Review Focus
 
 The highest-value review areas for this project are:
 
-- session isolation correctness
-- secret redaction in logs and diagnostics
-- command and runtime boundary checks
-- publish-time privacy verification
-
-These are also the main reasons this repository is a good fit for deeper tooling such as Codex Security.
+1. Session isolation correctness — can one user's prompt reach another's session?
+2. Authorization boundary — can an unauthorized user trigger Codex execution?
+3. SQLite data privacy — is payload properly scrubbed at each lifecycle stage?
+4. Lease token safety — can an expired lease overwrite active processing?
+5. Log and diagnostic redaction — are secrets leaked anywhere?
+6. npm package content — are local state files excluded from publication?

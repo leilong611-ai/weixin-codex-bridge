@@ -6,8 +6,11 @@ on:
     branches:
       - main
 
+env:
+  NODE_VERSION: "22"
+
 jobs:
-  test:
+  test-windows:
     runs-on: windows-latest
     timeout-minutes: 15
 
@@ -18,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
@@ -37,25 +40,48 @@ jobs:
         shell: bash
         run: npm run public-check
 
-      - name: Verify npm pack (dry run)
+      - name: Verify npm pack contents
         shell: bash
         run: |
-          PACK_JSON=$(npm pack --dry-run --json 2>&1)
-          echo "Pack JSON:"
-          echo "$PACK_JSON"
-          # Verify dist/cli.js is in the pack
-          if echo "$PACK_JSON" | grep -q "dist/cli.js"; then
-            echo "✓ dist/cli.js included in pack"
-          else
+          npm pack --pack-destination "${{ runner.temp }}/npm-pack"
+          tarball=$(ls "${{ runner.temp }}/npm-pack"/*.tgz)
+          mkdir -p "${{ runner.temp }}/pack-check"
+          tar -xzf "$tarball" -C "${{ runner.temp }}/pack-check"
+          echo "=== Pack contents ==="
+          find "${{ runner.temp }}/pack-check" -type f | sort
+          echo "=== Validation ==="
+          failures=0
+          if [ ! -f "${{ runner.temp }}/pack-check/package/dist/cli.js" ]; then
             echo "ERROR: dist/cli.js not in pack"
-            exit 1
+            failures=1
+          else
+            echo "✓ dist/cli.js"
           fi
-          # Verify no .env files in pack
-          if echo "$PACK_JSON" | grep -q ".env"; then
-            echo "ERROR: .env file in pack"
-            exit 1
+          if [ -f "${{ runner.temp }}/pack-check/package/.env" ]; then
+            echo "ERROR: .env found in pack"
+            failures=1
+          else
+            echo "✓ no .env"
           fi
-          echo "✓ No .env files in pack"
+          if [ -f "${{ runner.temp }}/pack-check/package/bridge.db" ]; then
+            echo "ERROR: bridge.db in pack"
+            failures=1
+          else
+            echo "✓ no bridge.db"
+          fi
+          if [ -f "${{ runner.temp }}/pack-check/package/README.md" ]; then
+            echo "✓ README.md"
+          fi
+          if [ -f "${{ runner.temp }}/pack-check/package/README.en.md" ]; then
+            echo "✓ README.en.md"
+          fi
+          if [ -f "${{ runner.temp }}/pack-check/package/LICENSE" ]; then
+            echo "✓ LICENSE"
+          fi
+          if [ -f "${{ runner.temp }}/pack-check/package/SECURITY.md" ]; then
+            echo "✓ SECURITY.md"
+          fi
+          exit $failures
 
   test-linux:
     runs-on: ubuntu-latest
@@ -68,7 +94,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install dependencies
@@ -83,12 +109,26 @@ jobs:
       - name: Public repository check
         run: npm run public-check
 
-      - name: Verify npm pack (dry run)
+      - name: Verify npm pack contents
         run: |
-          PACK_JSON=$(npm pack --dry-run --json 2>&1)
-          if echo "$PACK_JSON" | grep -q "dist/cli.js"; then
-            echo "✓ dist/cli.js included in pack"
-          else
+          npm pack --pack-destination "${{ runner.temp }}/npm-pack"
+          tarball=$(ls "${{ runner.temp }}/npm-pack"/*.tgz)
+          mkdir -p "${{ runner.temp }}/pack-check"
+          tar -xzf "$tarball" -C "${{ runner.temp }}/pack-check"
+          echo "=== Pack contents ==="
+          find "${{ runner.temp }}/pack-check" -type f | sort
+          echo "=== Validation ==="
+          failures=0
+          if [ ! -f "${{ runner.temp }}/pack-check/package/dist/cli.js" ]; then
             echo "ERROR: dist/cli.js not in pack"
-            exit 1
+            failures=1
+          else
+            echo "✓ dist/cli.js"
           fi
+          if [ -f "${{ runner.temp }}/pack-check/package/.env" ]; then
+            echo "ERROR: .env found in pack"
+            failures=1
+          else
+            echo "✓ no .env"
+          fi
+          exit $failures
