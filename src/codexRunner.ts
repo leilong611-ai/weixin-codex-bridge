@@ -63,7 +63,17 @@ export class CodexRunner {
       }
     }
 
-    args.push("--json", "--full-auto", "--skip-git-repo-check", "-o", lastMessagePath);
+    // Only add --full-auto if explicitly allowed via env var (default: false)
+    if (this.config.allowFullAuto) {
+      args.push("--full-auto");
+    }
+
+    // Only add --skip-git-repo-check if explicitly allowed (default: false)
+    if (this.config.allowSkipGitCheck) {
+      args.push("--skip-git-repo-check");
+    }
+
+    args.push("--json", "-o", lastMessagePath);
 
     if (this.config.codexModel) {
       args.push("-m", this.config.codexModel);
