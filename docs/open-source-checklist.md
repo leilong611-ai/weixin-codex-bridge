@@ -21,6 +21,14 @@ Use this checklist before publishing the repository or opening a pull request.
 - [ ] `.env.example` lists required variables with placeholders only.
 - [ ] The quick start works from a fresh clone after `npm install` and `npm run build`.
 
+## Security
+
+- [ ] `CODEX_WEIXIN_OWNER_PEER_IDS` is documented as REQUIRED.
+- [ ] Default security posture is documented (console off, restricted mode, full-auto off).
+- [ ] Workspace sandbox requirements are documented.
+- [ ] Data retention and cleanup instructions are documented.
+- [ ] SECURITY.md covers threat model, trust boundaries, and vulnerability reporting.
+
 ## Verification
 
 Run:
@@ -29,6 +37,7 @@ Run:
 npm run public-check
 npm test -- --run
 npm run build
+npm pack --dry-run --json
 ```
 
 If a check fails because it found sensitive material, remove the material from the candidate files instead of weakening the check.

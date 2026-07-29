@@ -53,6 +53,7 @@ describe("redact", () => {
   });
 
   it("redacts Slack tokens", () => {
+    // Build the input programmatically to avoid GitHub secret scanning false positives
     const prefix = "xoxb";
     const input = prefix + "-123456789012-abcdefghijklmnopqrst";
     const result = redact(input);
