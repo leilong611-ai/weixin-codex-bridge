@@ -6,103 +6,145 @@
  *
  * Key invariants:
  *   1. Inbox write succeeds BEFORE cursor is saved (message safety).
- *   2. Message IDs are unique — duplicate fetch does not duplicate Codex runs.
- *   3. Processing tasks have leases with timeout for crash recovery.
- *   4. All non-query writes use transactions.
+ *   2. Batch writes and cursor updates are atomic within a transaction.
+ *   3. Message IDs are scoped per account_key — duplicate fetch does not duplicate runs.
+ *   4. Processing tasks have lease tokens for safe state transitions.
+ *   5. Completed/skipped/rejected messages have payload scrubbed.
+ *   6. SQLite errors are never silently swallowed.
+ *
+ * @module
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync, constants } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 
 import type { BridgeConfig } from "./config.js";
+import { runMigrations, getSchemaVersion } from "./sqliteMigrations.js";
+import { LeaseManager } from "./leaseManager.js";
+import { DataRetention, type CleanupResult, type DataRetentionConfig } from "./dataRetention.js";
+import type { PayloadToStore, StoredPayload } from "./messagePayload.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+export type InboxInsertResult =
+  | { status: "inserted"; id: number }
+  | { status: "duplicate" };
+
+export interface PersistBatchResult {
+  inserted: number;
+  skipped: number;
+  /** Whether the cursor was updated */
+  cursorUpdated: boolean;
+}
+
+export interface PersistBatchParams {
+  accountKey: string;
+  nextCursor: string;
+  messages: PersistableInboxMessage[];
+}
+
+export interface PersistableInboxMessage {
+  messageUid: string;
+  peerId: string;
+  rawJson: string;
+  text: string;
+  createTimeMs?: number;
+  /** If set, message is persisted directly as this status (e.g., 'skipped') */
+  statusOverride?: "pending" | "skipped" | "rejected";
+}
+
 export interface StoredMessage {
   id: number;
-  message_uid: string;
-  peer_id: string;
-  raw_json: string;
+  messageUid: string;
+  accountKey: string;
+  peerId: string;
+  rawJson: string;
   text: string;
-  status: "pending" | "processing" | "completed" | "failed" | "dead";
-  created_at: number;
-  lease_until: number | null;
+  status: "pending" | "processing" | "completed" | "failed" | "dead" | "skipped" | "rejected";
+  createdAt: number;
+  leaseUntil: number | null;
+  leaseToken: string | null;
   attempts: number;
-  last_error: string | null;
+  lastError: string | null;
+  errorCategory: string | null;
+  completedAt: number | null;
 }
 
 export interface FailedTaskRow {
   id: string;
-  session_key: string;
-  peer_id: string;
+  sessionKey: string;
+  peerId: string;
   prompt: string;
   error: string;
-  message_uid: string | null;
-  run_directory: string | null;
-  created_at: number;
+  messageUid: string | null;
+  runDirectory: string | null;
+  createdAt: number;
+  reasonCode: string | null;
 }
 
 // ---------------------------------------------------------------------------
 // SQLite Store
 // ---------------------------------------------------------------------------
 
-const SCHEMA = `
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
-PRAGMA busy_timeout = 5000;
-
-CREATE TABLE IF NOT EXISTS inbox_messages (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  message_uid     TEXT    NOT NULL UNIQUE,
-  peer_id         TEXT    NOT NULL,
-  raw_json        TEXT    NOT NULL DEFAULT '',
-  text            TEXT    NOT NULL DEFAULT '',
-  status          TEXT    NOT NULL DEFAULT 'pending'
-                      CHECK(status IN ('pending','processing','completed','failed','dead')),
-  created_at      INTEGER NOT NULL,
-  lease_until     INTEGER,
-  attempts        INTEGER NOT NULL DEFAULT 0,
-  last_error      TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_inbox_status ON inbox_messages(status);
-CREATE INDEX IF NOT EXISTS idx_inbox_uid   ON inbox_messages(message_uid);
-
-CREATE TABLE IF NOT EXISTS runtime_metadata (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS failed_tasks (
-  id            TEXT PRIMARY KEY,
-  session_key   TEXT NOT NULL,
-  peer_id       TEXT NOT NULL,
-  prompt        TEXT NOT NULL,
-  error         TEXT NOT NULL,
-  message_uid   TEXT,
-  run_directory TEXT,
-  created_at    INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_failed_session ON failed_tasks(session_key);
-`;
+const DB_FILE_MODE = 0o600;
+const DB_DIR_MODE = 0o700;
 
 export class SqliteStore {
   private db: DatabaseSync;
   readonly dbPath: string;
+  readonly leaseManager: LeaseManager;
+  readonly dataRetention: DataRetention;
+  private _migrationApplied: boolean = false;
 
   constructor(config: BridgeConfig) {
     const dbDir = path.join(config.logRoot, "sqlite");
-    mkdirSync(dbDir, { recursive: true });
+    mkdirSync(dbDir, { recursive: true, mode: DB_DIR_MODE });
     this.dbPath = path.join(dbDir, "bridge.db");
+
+    // Set restrictive file mode on existing db if possible
+    try { chmodSync(this.dbPath, DB_FILE_MODE); } catch { /* may not exist yet */ }
+
     this.db = new DatabaseSync(this.dbPath);
-    this.db.exec(SCHEMA);
+
+    // Set restrictive file mode after creation
+    try { chmodSync(this.dbPath, DB_FILE_MODE); } catch { /* best-effort */ }
+
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.db.exec("PRAGMA synchronous = NORMAL");
+    this.db.exec("PRAGMA busy_timeout = 5000");
+
+    // Run migrations
+    const migrationResult = runMigrations(this.db);
+    if (migrationResult.applied.length > 0) {
+      this._migrationApplied = true;
+      console.log(
+        `[sqlite] migrated schema from v${migrationResult.fromVersion} ` +
+        `to v${migrationResult.toVersion} (applied: ${migrationResult.applied.join(", ")})`
+      );
+    }
+
+    this.leaseManager = new LeaseManager(this.db);
+    this.dataRetention = new DataRetention(this.db, {
+      retentionDays: config.dataRetentionDays,
+      walCheckpoint: true,
+    });
+  }
+
+  get schemaVersion(): number {
+    return getSchemaVersion(this.db);
+  }
+
+  get migrationApplied(): boolean {
+    return this._migrationApplied;
   }
 
   close(): void {
+    try {
+      this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch { /* best-effort */ }
     try { this.db.close(); } catch { /* idempotent */ }
   }
 
@@ -122,139 +164,244 @@ export class SqliteStore {
     ).run(key, value);
   }
 
-  // ---- Durable inbox ----------------------------------------------------
+  // ---- Durable inbox: single message insert -----------------------------
 
+  /**
+   * Insert a single message into the inbox.
+   *
+   * Uses ON CONFLICT to safely handle duplicates — SQLite errors that are
+   * NOT unique-key violations will propagate as exceptions.
+   *
+   * Fixes (replaces the old catch-and-return-false pattern):
+   *   - Only unique violations are treated as "duplicate"
+   *   - Disk full, corruption, I/O errors all throw
+   *   - Returns a discriminated result type
+   */
   insertInboxMessage(params: {
+    accountKey: string;
     messageUid: string;
     peerId: string;
     rawJson: string;
     text: string;
     createTimeMs?: number;
-  }): boolean {
-    try {
-      this.db.prepare(`
-        INSERT INTO inbox_messages (message_uid, peer_id, raw_json, text, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(
-        params.messageUid,
-        params.peerId,
-        params.rawJson,
-        params.text,
-        params.createTimeMs ?? Date.now(),
-      );
-      return true;
-    } catch {
-      return false; // UNIQUE violation = duplicate
+    statusOverride?: "skipped" | "rejected";
+  }): InboxInsertResult {
+    const status = params.statusOverride ?? "pending";
+    const now = params.createTimeMs ?? Date.now();
+
+    const result = this.db.prepare(`
+      INSERT INTO inbox_messages
+        (account_key, message_uid, peer_id, raw_json, text, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_key, message_uid) DO NOTHING
+    `).run(
+      params.accountKey,
+      params.messageUid,
+      params.peerId,
+      params.rawJson,
+      params.text,
+      status,
+      now,
+      status === "pending" ? null : now,
+    );
+
+    // changes === 1 → inserted
+    // changes === 0 → duplicate (ON CONFLICT DO NOTHING)
+    if (Number(result.changes) === 1) {
+      // Get the auto-generated id
+      const idRow = this.db.prepare(
+        "SELECT id FROM inbox_messages WHERE account_key = ? AND message_uid = ?"
+      ).get(params.accountKey, params.messageUid) as Record<string, unknown> | undefined;
+
+      return { status: "inserted", id: Number(idRow?.id ?? 0) };
     }
+
+    return { status: "duplicate" };
   }
 
-  claimNextMessage(leaseMs: number): StoredMessage | null {
-    this.db.exec("BEGIN");
-    try {
-      const row = this.db.prepare(`
-        SELECT id, message_uid, peer_id, raw_json, text, status,
-               created_at, lease_until, attempts, last_error
-        FROM inbox_messages
-        WHERE status IN ('pending', 'failed')
-           OR (status = 'processing' AND lease_until IS NOT NULL AND lease_until < ?)
-        ORDER BY id ASC
-        LIMIT 1
-      `).get(Date.now()) as Record<string, unknown> | undefined;
+  // ---- Durable inbox: batch persist with atomic cursor ------------------
 
-      if (!row) {
-        this.db.exec("COMMIT");
-        return null;
+  /**
+   * Persist a batch of fetched messages and update the cursor in a single
+   * SQLite transaction.
+   *
+   * Invariant: ALL messages and the cursor are committed atomically, or
+   * nothing is. On any non-duplicate error, the transaction rolls back.
+   */
+  persistFetchedBatch(params: PersistBatchParams): PersistBatchResult {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      let inserted = 0;
+      let skipped = 0;
+
+      const stmt = this.db.prepare(`
+        INSERT INTO inbox_messages
+          (account_key, message_uid, peer_id, raw_json, text, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(account_key, message_uid) DO NOTHING
+      `);
+
+      for (const msg of params.messages) {
+        const status = msg.statusOverride ?? "pending";
+        const now = msg.createTimeMs ?? Date.now();
+
+        const result = stmt.run(
+          params.accountKey,
+          msg.messageUid,
+          msg.peerId,
+          msg.rawJson,
+          msg.text,
+          status,
+          now,
+          status === "pending" ? null : now,
+        );
+
+        if (Number(result.changes) === 1) {
+          inserted++;
+        } else {
+          skipped++;
+        }
       }
 
-      this.db.prepare(`
-        UPDATE inbox_messages
-        SET status = 'processing', lease_until = ?, attempts = attempts + 1
-        WHERE id = ?
-      `).run(Date.now() + leaseMs, Number(row.id));
+      // Update cursor atomically with message writes
+      this.setMeta(`cursor:${params.accountKey}`, params.nextCursor);
 
       this.db.exec("COMMIT");
 
-      // Re-read to get updated attempts value
-      const updated = this.db.prepare(`
-        SELECT id, message_uid, peer_id, raw_json, text, status,
-               created_at, lease_until, attempts, last_error
-        FROM inbox_messages WHERE id = ?
-      `).get(Number(row.id)) as Record<string, unknown> | undefined;
-
-      return updated ? rowToMsg(updated) : rowToMsg(row, "processing", Date.now() + leaseMs);
+      return { inserted, skipped, cursorUpdated: true };
     } catch (err) {
       this.db.exec("ROLLBACK");
-      throw err;
+      throw new Error(
+        `persistFetchedBatch failed: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
-  completeMessage(id: number): void {
-    this.db.prepare(`
-      UPDATE inbox_messages SET status = 'completed', lease_until = NULL, last_error = NULL
-      WHERE id = ?
-    `).run(id);
+  // ---- Claim / lease / complete / fail (via LeaseManager) ----------------
+
+  claimNextMessage(
+    accountKey: string,
+    options?: { leaseMs?: number; owner?: string; now?: number },
+  ) {
+    return this.leaseManager.claimNext(accountKey, options);
   }
 
-  failMessage(id: number, error: string, maxAttempts = 3): void {
-    const row = this.db.prepare(
-      "SELECT attempts FROM inbox_messages WHERE id = ?"
-    ).get(id) as Record<string, unknown> | undefined;
-    const attempts = Number(row?.attempts ?? 0);
-    const ns = attempts >= maxAttempts ? "dead" : "failed";
-    this.db.prepare(`
-      UPDATE inbox_messages SET status = ?, lease_until = NULL, last_error = ? WHERE id = ?
-    `).run(ns, error.slice(0, 2000), id);
+  completeMessage(id: number, leaseToken: string): boolean {
+    return this.leaseManager.completeMessage({ id, leaseToken });
   }
 
-  countPending(): number {
+  failMessage(
+    id: number,
+    leaseToken: string,
+    error: string,
+    options?: { maxAttempts?: number; errorCategory?: string },
+  ): boolean {
+    return this.leaseManager.failMessage({
+      id,
+      leaseToken,
+      error,
+      maxAttempts: options?.maxAttempts,
+      errorCategory: options?.errorCategory,
+    });
+  }
+
+  skipMessage(id: number): boolean {
+    return this.leaseManager.skipMessage({ id });
+  }
+
+  rejectMessage(id: number, reason?: string): boolean {
+    return this.leaseManager.rejectMessage({ id, reason });
+  }
+
+  recoverExpiredLeases(accountKey: string, options?: { now?: number }): number {
+    return this.leaseManager.recoverExpiredLeases(accountKey, options);
+  }
+
+  renewLease(id: number, leaseToken: string, leaseMs?: number): boolean {
+    return this.leaseManager.renewLease({ id, leaseToken, leaseMs });
+  }
+
+  startHeartbeat(params: { id: number; leaseToken: string; owner?: string }) {
+    return this.leaseManager.startHeartbeat(params);
+  }
+
+  // ---- Account-scoped queries ------------------------------------------
+
+  /**
+   * Count pending (pending or failed) messages for a specific account.
+   */
+  countPending(accountKey: string): number {
     const row = this.db.prepare(
-      "SELECT COUNT(*) as cnt FROM inbox_messages WHERE status IN ('pending','failed')"
-    ).get() as Record<string, number>;
+      "SELECT COUNT(*) as cnt FROM inbox_messages WHERE account_key = ? AND status IN ('pending','failed')"
+    ).get(accountKey) as Record<string, number>;
     return Number(row.cnt);
   }
 
-  listRecentMessages(limit = 20): StoredMessage[] {
+  /**
+   * List recent messages for a specific account.
+   */
+  listRecentMessages(accountKey: string, limit = 20): StoredMessage[] {
     const rows = this.db.prepare(`
-      SELECT id, message_uid, peer_id, raw_json, text, status,
-             created_at, lease_until, attempts, last_error
-      FROM inbox_messages ORDER BY id DESC LIMIT ?
-    `).all(limit) as Record<string, unknown>[];
+      SELECT id, account_key, message_uid, peer_id, raw_json, text, status,
+             created_at, lease_until, lease_token, attempts, last_error,
+             error_category, completed_at
+      FROM inbox_messages
+      WHERE account_key = ?
+      ORDER BY id DESC LIMIT ?
+    `).all(accountKey, limit) as Record<string, unknown>[];
     return rows.map((r) => rowToMsg(r));
   }
 
   // ---- Cursor persistence -----------------------------------------------
 
-  loadSyncBuf(accountId: string): string {
-    return this.getMeta(`cursor:${accountId}`) ?? "";
+  loadSyncBuf(accountKey: string): string {
+    return this.getMeta(`cursor:${accountKey}`) ?? "";
   }
 
-  saveSyncBuf(accountId: string, buf: string): void {
-    this.setMeta(`cursor:${accountId}`, buf);
+  saveSyncBuf(accountKey: string, buf: string): void {
+    this.setMeta(`cursor:${accountKey}`, buf);
   }
 
   // ---- Failed tasks -----------------------------------------------------
 
   saveFailedTask(params: {
-    id: string; sessionKey: string; peerId: string; prompt: string;
-    error: string; messageUid?: string; runDirectory?: string;
+    id: string;
+    sessionKey: string;
+    peerId: string;
+    prompt: string;
+    error: string;
+    messageUid?: string;
+    runDirectory?: string;
+    reasonCode?: string;
   }): void {
     this.db.prepare(`
       INSERT OR REPLACE INTO failed_tasks
-      (id, session_key, peer_id, prompt, error, message_uid, run_directory, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, session_key, peer_id, prompt, error, message_uid, run_directory, created_at, reason_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      params.id, params.sessionKey, params.peerId, params.prompt,
+      params.id,
+      params.sessionKey,
+      params.peerId,
+      params.prompt,
       params.error.slice(0, 2000),
-      params.messageUid ?? null, params.runDirectory ?? null, Date.now(),
+      params.messageUid ?? null,
+      params.runDirectory ?? null,
+      Date.now(),
+      params.reasonCode ?? null,
     );
   }
 
   listFailedTasks(sessionKey: string): Array<{
-    id: string; prompt: string; error: string; peerId: string;
-    messageUid?: string; createdAt: number;
+    id: string;
+    prompt: string;
+    error: string;
+    peerId: string;
+    messageUid?: string;
+    createdAt: number;
+    reasonCode?: string;
   }> {
     const rows = this.db.prepare(`
-      SELECT id, prompt, error, peer_id, message_uid, created_at
+      SELECT id, prompt, error, peer_id, message_uid, created_at, reason_code
       FROM failed_tasks WHERE session_key = ? ORDER BY created_at DESC
     `).all(sessionKey) as Record<string, unknown>[];
     return rows.map((r) => ({
@@ -264,22 +411,29 @@ export class SqliteStore {
       peerId: String(r.peer_id ?? ""),
       messageUid: r.message_uid != null && String(r.message_uid) !== "" ? String(r.message_uid) : undefined,
       createdAt: Number(r.created_at),
+      reasonCode: r.reason_code != null ? String(r.reason_code) : undefined,
     }));
   }
 
   takeFailedTaskById(sessionKey: string, id: string): {
-    id: string; prompt: string; error: string; peerId: string; messageUid?: string;
+    id: string;
+    prompt: string;
+    error: string;
+    peerId: string;
+    messageUid?: string;
   } | undefined {
-    this.db.exec("BEGIN");
+    this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare(
-        "SELECT id, prompt, error, peer_id, message_uid FROM failed_tasks WHERE session_key = ? AND id = ?"
+        "SELECT id, prompt, error, peer_id, message_uid, reason_code FROM failed_tasks WHERE session_key = ? AND id = ?"
       ).get(sessionKey, id) as Record<string, unknown> | undefined;
       if (!row) { this.db.exec("COMMIT"); return undefined; }
       this.db.prepare("DELETE FROM failed_tasks WHERE session_key = ? AND id = ?").run(sessionKey, id);
       this.db.exec("COMMIT");
       return {
-        id: String(row.id), prompt: String(row.prompt), error: String(row.error),
+        id: String(row.id),
+        prompt: String(row.prompt),
+        error: String(row.error),
         peerId: String(row.peer_id),
         messageUid: row.message_uid ? String(row.message_uid) : undefined,
       };
@@ -317,15 +471,22 @@ export class SqliteStore {
     return v === "" ? undefined : v;
   }
 
-  // ---- Crash recovery ---------------------------------------------------
+  // ---- Data retention ---------------------------------------------------
 
-  recoverStuckMessages(leaseMs: number): number {
-    return Number(this.db.prepare(`
-      UPDATE inbox_messages
-      SET status = 'failed', lease_until = NULL,
-          last_error = 'recovered after crash (lease expired)'
-      WHERE status = 'processing' AND lease_until IS NOT NULL AND lease_until < ?
-    `).run(Date.now() - leaseMs).changes);
+  cleanupExpiredData(now?: number): CleanupResult {
+    return this.dataRetention.cleanup(now);
+  }
+
+  estimateCleanup(now?: number): CleanupResult {
+    return this.dataRetention.estimateCleanup(now);
+  }
+
+  scrubResidualPayloads(): number {
+    return this.dataRetention.scrubResidualPayloads();
+  }
+
+  getDatabaseInfo(): { dbBytes: number; walBytes: number; shmBytes: number } {
+    return this.dataRetention.getDatabaseInfo(this.dbPath);
   }
 
   // ---- Raw exec for tests -----------------------------------------------
@@ -337,21 +498,21 @@ export class SqliteStore {
 
 // ---- Helpers -------------------------------------------------------------
 
-function rowToMsg(
-  row: Record<string, unknown>,
-  statusOverride?: string,
-  leaseOverride?: number,
-): StoredMessage {
+function rowToMsg(row: Record<string, unknown>): StoredMessage {
   return {
     id: Number(row.id),
-    message_uid: String(row.message_uid ?? ""),
-    peer_id: String(row.peer_id ?? ""),
-    raw_json: String(row.raw_json ?? ""),
+    messageUid: String(row.message_uid ?? ""),
+    accountKey: String(row.account_key ?? ""),
+    peerId: String(row.peer_id ?? ""),
+    rawJson: String(row.raw_json ?? ""),
     text: String(row.text ?? ""),
-    status: (statusOverride ?? String(row.status ?? "")) as StoredMessage["status"],
-    created_at: Number(row.created_at),
-    lease_until: leaseOverride ?? (row.lease_until != null ? Number(row.lease_until) : null),
+    status: (String(row.status ?? "")) as StoredMessage["status"],
+    createdAt: Number(row.created_at),
+    leaseUntil: row.lease_until != null ? Number(row.lease_until) : null,
+    leaseToken: row.lease_token != null ? String(row.lease_token) : null,
     attempts: Number(row.attempts),
-    last_error: row.last_error != null ? String(row.last_error) : null,
+    lastError: row.last_error != null ? String(row.last_error) : null,
+    errorCategory: row.error_category != null ? String(row.error_category) : null,
+    completedAt: row.completed_at != null ? Number(row.completed_at) : null,
   };
 }

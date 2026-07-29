@@ -10,7 +10,9 @@ import { SessionTaskScheduler, type TaskSchedulerSnapshot } from "./messageSched
 import { splitWeixinReply } from "./replyText.js";
 import { createSessionKey } from "./sessionKey.js";
 import { BridgeStateStore } from "./stateStore.js";
-import { SqliteStore } from "./sqliteStore.js";
+import { SqliteStore, type StoredMessage } from "./sqliteStore.js";
+import { makeMessageUid, makeAccountHash, makePeerHash } from "./messageIdentity.js";
+import { preparePayload, payloadForRole, shouldStoreMessage, scrubPayload, MAX_MESSAGE_BYTES } from "./messagePayload.js";
 import { MessageType, type BridgeRunResult, type CodexRunOptions, type WeixinAccount, type WeixinMessage } from "./types.js";
 import { WeixinApi } from "./weixinApi.js";
 import { extractWeixinText } from "./weixinText.js";
@@ -22,7 +24,82 @@ import {
   REFUSAL_MESSAGE,
 } from "./auth.js";
 import { requireSecureWorkspace } from "./workspaceSecurity.js";
-import { createHash } from "node:crypto";
+
+/**
+ * Worker pool for processing durable inbox messages.
+ * Manages lease tokens, heartbeat, and safe state transitions.
+ */
+class InboxWorkerPool {
+  private readonly activeWorkers = new Map<number, {
+    leaseToken: string;
+    heartbeat: ReturnType<SqliteStore["startHeartbeat"]>;
+  }>();
+
+  constructor(
+    private readonly sqlite: SqliteStore,
+    private readonly processFn: (stored: import("./sqliteStore.js").StoredMessage) => Promise<void>,
+  ) {}
+
+  /**
+   * Claim and process the next available message.
+   * Starts a heartbeat for long-running operations.
+   */
+  async claimAndProcess(accountKey: string): Promise<boolean> {
+    const claim = this.sqlite.claimNextMessage(accountKey);
+    if (!claim) return false;
+
+    const heartbeat = this.sqlite.startHeartbeat({
+      id: claim.id,
+      leaseToken: claim.leaseToken,
+      owner: "bridge-worker",
+    });
+
+    this.activeWorkers.set(claim.id, { leaseToken: claim.leaseToken, heartbeat });
+
+    try {
+      const stored: StoredMessage = {
+        id: claim.id,
+        messageUid: claim.messageUid,
+        accountKey,
+        peerId: claim.peerId,
+        rawJson: claim.payload?.rawJson ?? "",
+        text: claim.text,
+        status: "processing",
+        createdAt: 0,
+        leaseUntil: claim.leaseUntil,
+        leaseToken: claim.leaseToken,
+        attempts: claim.attempts,
+        lastError: null,
+        errorCategory: null,
+        completedAt: null,
+      };
+
+      await this.processFn(stored);
+    } finally {
+      this.stopWorker(claim.id);
+    }
+
+    return true;
+  }
+
+  private stopWorker(id: number): void {
+    const worker = this.activeWorkers.get(id);
+    if (worker) {
+      worker.heartbeat.stop();
+      this.activeWorkers.delete(id);
+    }
+  }
+
+  clear(): void {
+    for (const [id] of this.activeWorkers) {
+      this.stopWorker(id);
+    }
+  }
+
+  get activeCount(): number {
+    return this.activeWorkers.size;
+  }
+}
 
 export class CodexWeixinBridge {
   private account?: WeixinAccount;
@@ -38,6 +115,9 @@ export class CodexWeixinBridge {
   private readonly state: BridgeStateStore;
   private readonly sqlite: SqliteStore;
   private readonly inFlight = new Set<Promise<unknown>>();
+  private workerPool!: InboxWorkerPool;
+  private readonly cleanups: Array<() => void> = [];
+  private _accountKey = "";
 
   constructor(private readonly config: BridgeConfig) {
     // Validate workspace security for non-high-risk mode
@@ -68,6 +148,41 @@ export class CodexWeixinBridge {
   async init(): Promise<void> {
     this.account = await loadWeixinAccount(this.config);
     this.api = new WeixinApi(this.config, this.account);
+
+    this._accountKey = makeAccountHash(this.account.accountId);
+
+    // Initialize worker pool after account is known
+    this.workerPool = new InboxWorkerPool(this.sqlite, async (stored) => {
+      try {
+        const message: WeixinMessage = JSON.parse(stored.rawJson);
+        const result = await this.processMessage(message);
+        if (result === "processed") {
+          this.sqlite.completeMessage(stored.id, stored.leaseToken!);
+        } else {
+          this.sqlite.completeMessage(stored.id, stored.leaseToken!);
+        }
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.sqlite.failMessage(stored.id, stored.leaseToken!, errMsg);
+      }
+    });
+
+    // Run data retention cleanup on startup
+    try {
+      const cleanupResult = this.sqlite.cleanupExpiredData();
+      if (cleanupResult.deletedMessages > 0 || cleanupResult.deletedFailedTasks > 0) {
+        console.log(
+          `[codex-weixin] cleanup: ${cleanupResult.deletedMessages} message(s), ` +
+          `${cleanupResult.deletedFailedTasks} failed task(s) removed`
+        );
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  get accountKey(): string {
+    return this._accountKey;
   }
 
   getTaskSnapshot(): TaskSchedulerSnapshot {
@@ -77,104 +192,152 @@ export class CodexWeixinBridge {
   async runForever(signal?: AbortSignal): Promise<void> {
     const account = this.requireAccount();
     const api = this.requireApi();
+    const accountKey = this.accountKey;
 
-    // Recover messages stuck in 'processing' state from a previous crash
-    const recovered = this.sqlite.recoverStuckMessages(300_000); // 5 min lease
+    // Step 1: Recover expired leases
+    const recovered = this.sqlite.recoverExpiredLeases(accountKey);
     if (recovered > 0) {
       console.log(`[codex-weixin] recovered ${recovered} stuck message(s) from SQLite inbox`);
     }
 
-    // Load cursor from SQLite (falls back to JSON sync state if empty)
+    // Step 2: Drain existing pending/failed messages BEFORE contacting WeChat API
+    // This ensures crash recovery works even if WeChat API is temporarily down.
+    await this.drainInbox(accountKey);
+
+    // Step 3: Load cursor from SQLite (falls back to JSON sync state if empty)
     const syncState = await this.state.loadSyncState(account.accountId);
-    let syncBuf = this.sqlite.loadSyncBuf(account.accountId) || syncState.getUpdatesBuf;
+    let syncBuf = this.sqlite.loadSyncBuf(accountKey) || syncState.getUpdatesBuf;
     let shouldSkipBacklog = this.config.skipBacklogOnStart && syncState.source !== "local";
 
+    // Step 4: Normal polling loop
     while (!signal?.aborted) {
       const response = await api.getUpdates(syncBuf, this.config.pollTimeoutMs);
       if ((response.ret ?? 0) !== 0 || (response.errcode ?? 0) !== 0) {
         throw new Error(`Weixin getUpdates failed: ret=${response.ret ?? 0} errcode=${response.errcode ?? 0} ${response.errmsg ?? ""}`.trim());
       }
 
-      // ---- CRITICAL ORDER: inbox first, then cursor ----
-      let hasNewMessages = false;
+      // ---- CRITICAL ORDER: batch inbox first, then cursor ----
+      const persistMessages: Array<{
+        messageUid: string;
+        peerId: string;
+        rawJson: string;
+        text: string;
+        createTimeMs?: number;
+        statusOverride?: "skipped" | "rejected";
+      }> = [];
+
       for (const message of response.msgs ?? []) {
-        const messageUid = makeMessageUid(message);
+        const messageUid = makeMessageUid({
+          accountId: account.accountId,
+          messageId: message.message_id,
+          fromUserId: message.from_user_id,
+          createTimeMs: message.create_time_ms,
+          sessionId: message.session_id,
+          text: extractWeixinText(message),
+          contextToken: message.context_token,
+        });
+
         const text = extractWeixinText(message);
         const peerId = message.from_user_id?.trim() ?? "";
+        const isBot = message.message_type === MessageType.BOT;
+        const logLevel = this.config.logLevel;
 
-        // Insert into durable inbox (UNIQUE constraint deduplicates)
-        const inserted = this.sqlite.insertInboxMessage({
-          messageUid,
-          peerId,
-          rawJson: JSON.stringify(message),
+        // Prepare normalized payload
+        const payload = preparePayload(
+          JSON.stringify(message),
           text,
-          createTimeMs: message.create_time_ms,
-        });
-        if (inserted) {
-          hasNewMessages = true;
-        }
-      }
+          message.message_type ?? 0,
+          isBot,
+          logLevel,
+        );
 
-      // NOW save the cursor — if we crash before this, we'll re-fetch and
-      // deduplicate via message_uid UNIQUE constraint in SQLite.
-      if (response.get_updates_buf) {
-        syncBuf = response.get_updates_buf;
-        this.sqlite.saveSyncBuf(account.accountId, syncBuf);
-      }
+        // Determine if we should store full content based on authorization
+        const auth = peerId ? authorizePeer(peerId, this.config) : null;
+        const role = auth?.role ?? "unknown";
 
-      if (shouldSkipBacklog) {
-        shouldSkipBacklog = false;
-        if (hasNewMessages) {
-          await this.state.appendMirrorEvent({
-            accountId: account.accountId,
-            direction: "system",
-            peerId: "startup",
-            sessionKey: "startup",
-            text: `Skipped ${response.msgs?.length ?? 0} startup backlog message(s).`,
-            timestamp: new Date().toISOString()
+        // For skipped backlog, minimize stored data
+        if (shouldSkipBacklog) {
+          persistMessages.push({
+            messageUid,
+            peerId: makePeerHash(peerId),
+            rawJson: "",
+            text: "",
+            createTimeMs: message.create_time_ms,
+            statusOverride: "skipped",
           });
           continue;
         }
+
+        // Authorized content decision
+        const content = payloadForRole(role, payload);
+
+        // Check message size limit
+        const oversized = payload.rawJson.length > MAX_MESSAGE_BYTES ||
+          payload.text.length > MAX_MESSAGE_BYTES;
+
+        persistMessages.push({
+          messageUid,
+          peerId: makePeerHash(peerId),
+          rawJson: content.rawJson,
+          text: content.text,
+          createTimeMs: message.create_time_ms,
+          statusOverride: oversized ? "rejected" : undefined,
+        });
       }
 
-      // Drain inbox: claim and process messages one by one
-      await this.drainInbox(account.accountId);
+      // Atomically persist the batch and update the cursor
+      if (persistMessages.length > 0) {
+        const batchResult = this.sqlite.persistFetchedBatch({
+          accountKey,
+          nextCursor: response.get_updates_buf ?? syncBuf,
+          messages: persistMessages,
+        });
+
+        // Only update syncBuf after successful persistence
+        if (response.get_updates_buf) {
+          syncBuf = response.get_updates_buf;
+        }
+
+        if (shouldSkipBacklog) {
+          shouldSkipBacklog = false;
+          const backlogCount = batchResult.inserted + batchResult.skipped;
+          console.log(`[codex-weixin] skipped ${backlogCount} startup backlog message(s)`);
+          if (backlogCount > 0) {
+            await this.state.appendMirrorEvent({
+              accountId: account.accountId,
+              direction: "system",
+              peerId: "startup",
+              sessionKey: "startup",
+              text: `Skipped ${backlogCount} startup backlog message(s).`,
+              timestamp: new Date().toISOString()
+            });
+          }
+          // Skip processing for this cycle — backlog was just skipped
+          continue;
+        }
+      } else if (response.get_updates_buf) {
+        // No messages but cursor changed — still persist the cursor
+        syncBuf = response.get_updates_buf;
+        this.sqlite.saveSyncBuf(accountKey, syncBuf);
+      }
+
+      // Drain inbox: claim and process pending messages
+      await this.drainInbox(accountKey);
     }
 
     await Promise.allSettled(this.inFlight);
+    this.workerPool.clear();
+    this.runCleanups();
   }
 
   /**
-   * Claim and process pending inbox messages.
-   * Each message gets a 5-minute lease.
+   * Drain inbox — process pending messages.
+   * This is also called on startup BEFORE WeChat polling begins.
    */
-  private async drainInbox(accountId: string): Promise<void> {
+  private async drainInbox(accountKey: string): Promise<void> {
     for (;;) {
-      const msg = this.sqlite.claimNextMessage(300_000);
-      if (!msg) break;
-
-      const message: WeixinMessage = JSON.parse(msg.raw_json);
-      this.trackBackgroundTask(
-        this.processInboxMessage(accountId, msg, message)
-      );
-    }
-  }
-
-  private async processInboxMessage(
-    accountId: string,
-    stored: import("./sqliteStore.js").StoredMessage,
-    message: WeixinMessage,
-  ): Promise<void> {
-    try {
-      const result = await this.processMessage(message);
-      if (result === "processed") {
-        this.sqlite.completeMessage(stored.id);
-      } else {
-        this.sqlite.completeMessage(stored.id); // skipped is still "done"
-      }
-    } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
-      this.sqlite.failMessage(stored.id, errMsg);
+      const claimed = await this.workerPool.claimAndProcess(accountKey);
+      if (!claimed) break;
     }
   }
 
@@ -193,7 +356,6 @@ export class CodexWeixinBridge {
     // ---- Authorization check ----
     const auth = authorizePeer(peerId, this.config);
     if (auth.role === "unknown") {
-      // Unauthorized: send a generic refusal — never leak internal state
       await api.sendText({
         to: peerId,
         text: REFUSAL_MESSAGE,
@@ -577,6 +739,13 @@ export class CodexWeixinBridge {
       });
   }
 
+  private runCleanups(): void {
+    for (const cleanup of this.cleanups) {
+      try { cleanup(); } catch { /* best-effort */ }
+    }
+    this.cleanups.length = 0;
+  }
+
   private requireAccount(): WeixinAccount {
     if (!this.account) {
       throw new Error("Bridge is not initialized. Call init() first.");
@@ -602,19 +771,4 @@ function isVerifiedModelSwitch(result: DesktopModelSwitchResult, model: string):
 function isMenuSelectedModelSwitch(result: DesktopModelSwitchResult, model: string): boolean {
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
   return output.includes("selected codex desktop model by menu") && output.includes(model.toLowerCase());
-}
-
-/**
- * Build a stable, unique message identifier from a Weixin message.
- * Uses message_id if available, otherwise falls back to a hash of
- * (from_user_id + create_time_ms + text).
- */
-function makeMessageUid(message: WeixinMessage): string {
-  if (message.message_id != null) {
-    return `msg:${message.message_id}`;
-  }
-  // Fallback: hash-based identifier for messages without message_id
-  return `hash:${createHash("sha256").update(
-    `${message.from_user_id ?? ""}\0${message.create_time_ms ?? 0}\0${message.session_id ?? ""}`
-  ).digest("hex").slice(0, 20)}`;
 }
