@@ -13,6 +13,14 @@ import { BridgeStateStore } from "./stateStore.js";
 import { MessageType, type BridgeRunResult, type CodexRunOptions, type WeixinAccount, type WeixinMessage } from "./types.js";
 import { WeixinApi } from "./weixinApi.js";
 import { extractWeixinText } from "./weixinText.js";
+import {
+  authorizePeer,
+  classifyCommand,
+  canUseCommand,
+  type PeerAuthorization,
+  REFUSAL_MESSAGE,
+} from "./auth.js";
+import { requireSecureWorkspace } from "./workspaceSecurity.js";
 
 export class CodexWeixinBridge {
   private account?: WeixinAccount;
@@ -29,6 +37,11 @@ export class CodexWeixinBridge {
   private readonly inFlight = new Set<Promise<unknown>>();
 
   constructor(private readonly config: BridgeConfig) {
+    // Validate workspace security for non-high-risk mode
+    if (config.executionMode !== "high-risk") {
+      requireSecureWorkspace(config);
+    }
+
     this.runner = config.deliveryMode === "desktop-ui"
       ? new DesktopUiRunner(config)
       : new CodexRunner(config);
@@ -110,6 +123,18 @@ export class CodexWeixinBridge {
       return "skipped";
     }
 
+    // ---- Authorization check ----
+    const auth = authorizePeer(peerId, this.config);
+    if (auth.role === "unknown") {
+      // Unauthorized: send a generic refusal — never leak internal state
+      await api.sendText({
+        to: peerId,
+        text: REFUSAL_MESSAGE,
+        contextToken: message.context_token,
+      });
+      return "skipped";
+    }
+
     const text = extractWeixinText(message);
     const sessionKey = createSessionKey(account.accountId, peerId);
     if (!text) {
@@ -122,10 +147,22 @@ export class CodexWeixinBridge {
     }
 
     if (!isBridgeCommandText(text.trim())) {
+      // Plain message — need at least "allowed" role
+      if (auth.role === "readonly") {
+        await api.sendText({
+          to: peerId,
+          text: "只读用户不能触发 Codex 执行。",
+          contextToken: message.context_token,
+        });
+        return "skipped";
+      }
+
       return await this.scheduler.schedule(
         sessionKey,
         async () => {
-          await this.state.saveLastPrompt(sessionKey, text);
+          if (this.config.storeFullPrompts) {
+            await this.state.saveLastPrompt(sessionKey, text);
+          }
           await this.appendInboundMirror({
             accountId: account.accountId,
             message,
@@ -145,6 +182,17 @@ export class CodexWeixinBridge {
         },
         { label: text.slice(0, 80) }
       );
+    }
+
+    // Bridge command — authorize based on command classification
+    const access = classifyCommand(text.trim());
+    if (!canUseCommand(auth.role, access)) {
+      await api.sendText({
+        to: peerId,
+        text: "这条管理命令需要更高的权限。",
+        contextToken: message.context_token,
+      });
+      return "skipped";
     }
 
     await this.appendInboundMirror({

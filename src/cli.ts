@@ -1,15 +1,21 @@
 import { loadBridgeConfig } from "./config.js";
 import { CodexWeixinBridge } from "./bridge.js";
 import { startConsoleServer } from "./consoleServer.js";
+import { requireAuthorizedStartup } from "./auth.js";
+import { requireSecureWorkspace } from "./workspaceSecurity.js";
 
 async function main(): Promise<void> {
   const config = loadBridgeConfig();
+
+  // ---- Security startup guards ----
+  requireAuthorizedStartup(config);
+  requireSecureWorkspace(config);
+
   const bridge = new CodexWeixinBridge(config);
   await bridge.init();
 
   console.log(`[codex-weixin] bridge started`);
   console.log(`[codex-weixin] state root: ${config.logRoot}`);
-  console.log(`[codex-weixin] codex cwd: ${config.codexCwd}`);
 
   const controller = new AbortController();
   const consoleServer = config.consoleEnabled
