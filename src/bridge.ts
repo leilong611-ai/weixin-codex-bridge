@@ -10,6 +10,7 @@ import { SessionTaskScheduler, type TaskSchedulerSnapshot } from "./messageSched
 import { splitWeixinReply } from "./replyText.js";
 import { createSessionKey } from "./sessionKey.js";
 import { BridgeStateStore } from "./stateStore.js";
+import { SqliteStore } from "./sqliteStore.js";
 import { MessageType, type BridgeRunResult, type CodexRunOptions, type WeixinAccount, type WeixinMessage } from "./types.js";
 import { WeixinApi } from "./weixinApi.js";
 import { extractWeixinText } from "./weixinText.js";
@@ -21,6 +22,7 @@ import {
   REFUSAL_MESSAGE,
 } from "./auth.js";
 import { requireSecureWorkspace } from "./workspaceSecurity.js";
+import { createHash } from "node:crypto";
 
 export class CodexWeixinBridge {
   private account?: WeixinAccount;
@@ -34,6 +36,7 @@ export class CodexWeixinBridge {
   private readonly desktopModelSwitcher: (model: string) => Promise<DesktopModelSwitchResult>;
   private readonly scheduler: SessionTaskScheduler;
   private readonly state: BridgeStateStore;
+  private readonly sqlite: SqliteStore;
   private readonly inFlight = new Set<Promise<unknown>>();
 
   constructor(private readonly config: BridgeConfig) {
@@ -59,6 +62,7 @@ export class CodexWeixinBridge {
       ? 1
       : config.maxParallelRuns);
     this.state = new BridgeStateStore(config);
+    this.sqlite = new SqliteStore(config);
   }
 
   async init(): Promise<void> {
@@ -73,8 +77,16 @@ export class CodexWeixinBridge {
   async runForever(signal?: AbortSignal): Promise<void> {
     const account = this.requireAccount();
     const api = this.requireApi();
+
+    // Recover messages stuck in 'processing' state from a previous crash
+    const recovered = this.sqlite.recoverStuckMessages(300_000); // 5 min lease
+    if (recovered > 0) {
+      console.log(`[codex-weixin] recovered ${recovered} stuck message(s) from SQLite inbox`);
+    }
+
+    // Load cursor from SQLite (falls back to JSON sync state if empty)
     const syncState = await this.state.loadSyncState(account.accountId);
-    let syncBuf = syncState.getUpdatesBuf;
+    let syncBuf = this.sqlite.loadSyncBuf(account.accountId) || syncState.getUpdatesBuf;
     let shouldSkipBacklog = this.config.skipBacklogOnStart && syncState.source !== "local";
 
     while (!signal?.aborted) {
@@ -83,14 +95,36 @@ export class CodexWeixinBridge {
         throw new Error(`Weixin getUpdates failed: ret=${response.ret ?? 0} errcode=${response.errcode ?? 0} ${response.errmsg ?? ""}`.trim());
       }
 
+      // ---- CRITICAL ORDER: inbox first, then cursor ----
+      let hasNewMessages = false;
+      for (const message of response.msgs ?? []) {
+        const messageUid = makeMessageUid(message);
+        const text = extractWeixinText(message);
+        const peerId = message.from_user_id?.trim() ?? "";
+
+        // Insert into durable inbox (UNIQUE constraint deduplicates)
+        const inserted = this.sqlite.insertInboxMessage({
+          messageUid,
+          peerId,
+          rawJson: JSON.stringify(message),
+          text,
+          createTimeMs: message.create_time_ms,
+        });
+        if (inserted) {
+          hasNewMessages = true;
+        }
+      }
+
+      // NOW save the cursor — if we crash before this, we'll re-fetch and
+      // deduplicate via message_uid UNIQUE constraint in SQLite.
       if (response.get_updates_buf) {
         syncBuf = response.get_updates_buf;
-        await this.state.saveSyncBuf(account.accountId, syncBuf);
+        this.sqlite.saveSyncBuf(account.accountId, syncBuf);
       }
 
       if (shouldSkipBacklog) {
         shouldSkipBacklog = false;
-        if ((response.msgs ?? []).length > 0) {
+        if (hasNewMessages) {
           await this.state.appendMirrorEvent({
             accountId: account.accountId,
             direction: "system",
@@ -103,12 +137,45 @@ export class CodexWeixinBridge {
         }
       }
 
-      for (const message of response.msgs ?? []) {
-        this.trackBackgroundTask(this.processMessage(message));
-      }
+      // Drain inbox: claim and process messages one by one
+      await this.drainInbox(account.accountId);
     }
 
     await Promise.allSettled(this.inFlight);
+  }
+
+  /**
+   * Claim and process pending inbox messages.
+   * Each message gets a 5-minute lease.
+   */
+  private async drainInbox(accountId: string): Promise<void> {
+    for (;;) {
+      const msg = this.sqlite.claimNextMessage(300_000);
+      if (!msg) break;
+
+      const message: WeixinMessage = JSON.parse(msg.raw_json);
+      this.trackBackgroundTask(
+        this.processInboxMessage(accountId, msg, message)
+      );
+    }
+  }
+
+  private async processInboxMessage(
+    accountId: string,
+    stored: import("./sqliteStore.js").StoredMessage,
+    message: WeixinMessage,
+  ): Promise<void> {
+    try {
+      const result = await this.processMessage(message);
+      if (result === "processed") {
+        this.sqlite.completeMessage(stored.id);
+      } else {
+        this.sqlite.completeMessage(stored.id); // skipped is still "done"
+      }
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.sqlite.failMessage(stored.id, errMsg);
+    }
   }
 
   async processMessage(message: WeixinMessage): Promise<"processed" | "skipped"> {
@@ -535,4 +602,19 @@ function isVerifiedModelSwitch(result: DesktopModelSwitchResult, model: string):
 function isMenuSelectedModelSwitch(result: DesktopModelSwitchResult, model: string): boolean {
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
   return output.includes("selected codex desktop model by menu") && output.includes(model.toLowerCase());
+}
+
+/**
+ * Build a stable, unique message identifier from a Weixin message.
+ * Uses message_id if available, otherwise falls back to a hash of
+ * (from_user_id + create_time_ms + text).
+ */
+function makeMessageUid(message: WeixinMessage): string {
+  if (message.message_id != null) {
+    return `msg:${message.message_id}`;
+  }
+  // Fallback: hash-based identifier for messages without message_id
+  return `hash:${createHash("sha256").update(
+    `${message.from_user_id ?? ""}\0${message.create_time_ms ?? 0}\0${message.session_id ?? ""}`
+  ).digest("hex").slice(0, 20)}`;
 }
