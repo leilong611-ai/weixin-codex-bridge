@@ -18,7 +18,7 @@ WeChat is where the conversation happens. Codex is where the work gets done.
 
 Weixin Codex Bridge connects them — securely.
 
-No cloud. No routing layers. Just a standalone bridge with role-based access and a durable queue.
+No hosted bridge service required. Codex execution and bridge state stay local, with role-based access and a durable queue.
 
 GitHub → [URL]
 
@@ -26,7 +26,7 @@ GitHub → [URL]
 
 WeChat → Codex locally.
 
-Default-deny. Sandboxed workspace. Per-peer session isolation. Lease tokens prevent duplicate execution.
+Default-deny. Sandboxed workspace. Per-peer session isolation. Lease tokens reduce stale-worker and duplicate-execution risk.
 
 If it\'s not on the allowlist, it doesn\'t reach Codex.
 
@@ -36,9 +36,9 @@ Weixin Codex Bridge — secure by default, durable by design.
 
 SQLite WAL durable inbox. Transactional batch writes. Heartbeat lease renewal. Crash recovery.
 
-Stop worrying about lost messages when the bridge restarts.
+Durable SQLite recovery reduces message-loss risk across restarts.
 
-本地持久化 + 崩溃恢复，重启不丢消息。
+本地持久化和崩溃恢复可降低重启期间的消息丢失风险。
 
 ---
 
@@ -65,7 +65,7 @@ Every message classified before persistence. Unauthorized? Never reaches the inb
 We don\'t claim "perfect security." We document the controls:
 
 - Prompt injection? Can\'t be eliminated — workspace isolation mitigates
-- Duplicate execution? Lease tokens + heartbeat prevent
+- Duplicate execution? Lease tokens + heartbeat reduce the risk
 - Data leakage? Payload scrubbed on completion, retention cleanup runs automatically
 - SQLite errors? They propagate — no silent swallows
 
@@ -168,3 +168,29 @@ A bridge icon (two pillars with arch) composed of:
 - Exclude: real QR codes, real account IDs, real tokens, real session data
 - Exclude: screenshots of actual WeChat conversations with identifiable content
 - Exclude: "fully secure" or "never loses messages" claims
+
+---
+
+## Build in Public Angles
+
+### Problem
+
+WeChat is where many conversations happen. Codex is where development work happens. Connecting them introduces a local execution security boundary.
+
+### Engineering
+
+Why the bridge uses default-deny authorization, per-peer session isolation, a workspace sandbox, a durable SQLite inbox, lease tokens with heartbeat renewal, and payload scrubbing.
+
+### Failure and Learning
+
+Real maintenance lessons: Windows SQLite handle lifecycle, a temp-directory security fixture that contradicted production policy, Git Bash drive-path handling in npm pack verification, and crash-recovery semantics.
+
+---
+
+## OpenAI Codex Ecosystem Show & Tell Draft
+
+**A security-first WeChat → local Codex bridge**
+
+I built a narrow, auditable bridge instead of a full routing framework. It treats WeChat input as untrusted, applies default-deny roles, isolates sessions and workspaces, and persists queued work in SQLite with lease tokens, heartbeat renewal, and crash recovery.
+
+The project documents its trust boundaries and limitations, runs Windows/Linux CI, and keeps Codex execution and bridge state local. It is a Chinese developer use case and an ongoing open-source maintainer workflow—not an official OpenAI project or endorsement.
