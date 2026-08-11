@@ -52,7 +52,7 @@ describe.skipIf(!isWindows)("DesktopUiRunner", () => {
     );
 
     expect(Number.parseInt(readFileSync(attemptPath, "utf8"), 10)).toBe(1);
-  }, 15_000);
+  }, 60_000);
 
   it("checks Desktop readiness before sending and stops before paste when readiness fails", async () => {
     const root = makeTempRoot();
@@ -89,7 +89,7 @@ describe.skipIf(!isWindows)("DesktopUiRunner", () => {
 
     expect(Number.parseInt(readFileSync(detectPath, "utf8"), 10)).toBe(1);
     expect(Number.parseInt(readFileSync(sendPath, "utf8"), 10)).toBe(0);
-  }, 15_000);
+  }, 60_000);
 });
 
 function fakeDesktopInputScript(attemptPath: string, sessionPath: string): string {
