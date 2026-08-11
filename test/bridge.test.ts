@@ -9,17 +9,24 @@ import { createSessionKey } from "../src/sessionKey.js";
 import { MessageItemType, MessageType, type WeixinAccount, type WeixinMessage } from "../src/types.js";
 
 const tempRoots: string[] = [];
+const bridges: CodexWeixinBridge[] = [];
 
 describe("CodexWeixinBridge", () => {
-  afterEach(() => {
-    for (const root of tempRoots.splice(0)) {
-      rmSync(root, { force: true, recursive: true });
+  afterEach(async () => {
+    try {
+      for (const bridge of bridges.splice(0)) {
+        await bridge.dispose({ gracePeriodMs: 100 });
+      }
+    } finally {
+      for (const root of tempRoots.splice(0)) {
+        rmSync(root, { force: true, recursive: true });
+      }
     }
   });
 
   it("keeps a Desktop UI runner failure scoped to one Weixin message", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -50,7 +57,7 @@ describe("CodexWeixinBridge", () => {
 
   it("stores failed Desktop UI deliveries for retry commands", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -85,7 +92,7 @@ describe("CodexWeixinBridge", () => {
 
   it("falls back to Codex CLI when Desktop UI delivery is not recorded", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const fallbackPrompts: string[] = [];
     const bridgeInternals = bridge as unknown as {
@@ -133,7 +140,7 @@ describe("CodexWeixinBridge", () => {
   it("stores a successful normal message so retry can resend it", async () => {
     const root = makeTempRoot();
     // Need storeFullPrompts for retry to work
-    const bridge = new CodexWeixinBridge(makeConfig(root, true));
+    const bridge = makeBridge(makeConfig(root, true));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -167,7 +174,7 @@ describe("CodexWeixinBridge", () => {
 
   it("splits long Codex replies before sending them to Weixin", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const longReply = "A".repeat(3301);
     const bridgeInternals = bridge as unknown as {
@@ -202,7 +209,7 @@ describe("CodexWeixinBridge", () => {
 
   it("can run different Weixin peers through separate worker slots", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge({
+    const bridge = makeBridge({
       ...makeConfig(root),
       deliveryMode: "codex-cli",
       maxParallelRuns: 2
@@ -249,7 +256,7 @@ describe("CodexWeixinBridge", () => {
 
   it("exposes the live task snapshot for console agent status", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge({
+    const bridge = makeBridge({
       ...makeConfig(root),
       deliveryMode: "codex-cli",
       maxParallelRuns: 2
@@ -299,7 +306,7 @@ describe("CodexWeixinBridge", () => {
 
   it("keeps messages from the same Weixin peer ordered even when submitted together", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge({
+    const bridge = makeBridge({
       ...makeConfig(root),
       deliveryMode: "codex-cli",
       maxParallelRuns: 2
@@ -342,7 +349,7 @@ describe("CodexWeixinBridge", () => {
 
   it("switches the Codex Desktop model for a desktop model command", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const switchedModels: string[] = [];
     const bridgeInternals = bridge as unknown as {
@@ -374,7 +381,7 @@ describe("CodexWeixinBridge", () => {
 
   it("does not report model switch success when the script only clicked", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -401,7 +408,7 @@ describe("CodexWeixinBridge", () => {
 
   it("reports a menu-based desktop model selection separately from visual verification", async () => {
     const root = makeTempRoot();
-    const bridge = new CodexWeixinBridge(makeConfig(root));
+    const bridge = makeBridge(makeConfig(root));
     const sentTexts: string[] = [];
     const bridgeInternals = bridge as unknown as {
       account: WeixinAccount;
@@ -434,6 +441,12 @@ function makeTextMessage(text: string, fromUserId = "wx-user"): WeixinMessage {
     message_type: MessageType.USER,
     item_list: [{ type: MessageItemType.TEXT, text_item: { text } }]
   };
+}
+
+function makeBridge(config: BridgeConfig): CodexWeixinBridge {
+  const bridge = new CodexWeixinBridge(config);
+  bridges.push(bridge);
+  return bridge;
 }
 
 function makeTempRoot(): string {

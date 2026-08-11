@@ -43,6 +43,7 @@ jobs:
       - name: Verify npm pack contents
         shell: bash
         run: |
+          mkdir -p "${{ runner.temp }}/npm-pack"
           npm pack --pack-destination "${{ runner.temp }}/npm-pack"
           tarball=$(ls "${{ runner.temp }}/npm-pack"/*.tgz)
           mkdir -p "${{ runner.temp }}/pack-check"
@@ -111,6 +112,7 @@ jobs:
 
       - name: Verify npm pack contents
         run: |
+          mkdir -p "${{ runner.temp }}/npm-pack"
           npm pack --pack-destination "${{ runner.temp }}/npm-pack"
           tarball=$(ls "${{ runner.temp }}/npm-pack"/*.tgz)
           mkdir -p "${{ runner.temp }}/pack-check"
