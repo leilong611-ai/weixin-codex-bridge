@@ -80,7 +80,7 @@ describe("validateWorkspace", () => {
 
   it("rejects workspace outside sandbox root when sandboxRoot is set", () => {
     const testId = `ws-sandbox-${Date.now()}`;
-    const testRoot = path.join(os.tmpdir(), testId);
+    const testRoot = makeWorkspaceTestRoot(testId);
     const sandboxDir = path.join(testRoot, "sandbox");
     const outsideDir = path.join(testRoot, "outside");
     fs.mkdirSync(sandboxDir, { recursive: true });
@@ -101,7 +101,7 @@ describe("validateWorkspace", () => {
 
   it("allows workspace inside sandbox root", () => {
     const testId = `ws-inside-${Date.now()}`;
-    const testRoot = path.join(os.tmpdir(), testId);
+    const testRoot = makeWorkspaceTestRoot(testId);
     const sandboxDir = path.join(testRoot, "sandbox");
     const insideDir = path.join(sandboxDir, "project");
     fs.mkdirSync(insideDir, { recursive: true });
@@ -120,7 +120,7 @@ describe("validateWorkspace", () => {
 
   it("rejects workspace not in any allowedWorkspaceRoots", () => {
     const testId = `ws-allowed-${Date.now()}`;
-    const testRoot = path.join(os.tmpdir(), testId);
+    const testRoot = makeWorkspaceTestRoot(testId);
     const allowedDir = path.join(testRoot, "allowed");
     const outsideDir = path.join(testRoot, "outside");
     fs.mkdirSync(allowedDir, { recursive: true });
@@ -141,7 +141,7 @@ describe("validateWorkspace", () => {
 
   it("allows workspace in an allowedWorkspaceRoot", () => {
     const testId = `ws-allowed-inside-${Date.now()}`;
-    const testRoot = path.join(os.tmpdir(), testId);
+    const testRoot = makeWorkspaceTestRoot(testId);
     const projectDir = path.join(testRoot, "project");
     fs.mkdirSync(projectDir, { recursive: true });
 
@@ -159,7 +159,7 @@ describe("validateWorkspace", () => {
 
   it("accepts a safe workspace", () => {
     const testId = `ws-safe-${Date.now()}`;
-    const testRoot = path.join(os.tmpdir(), testId);
+    const testRoot = makeWorkspaceTestRoot(testId);
     const projectDir = path.join(testRoot, "safe-project");
     fs.mkdirSync(projectDir, { recursive: true });
 
@@ -183,3 +183,9 @@ describe("validateWorkspace", () => {
     expect(() => requireSecureWorkspace(config)).not.toThrow();
   });
 });
+
+function makeWorkspaceTestRoot(testId: string): string {
+  // ponytail: process.cwd() is safe on GitHub's Windows runner; use a configurable non-forbidden root if local Windows checkout paths need support.
+  const base = process.platform === "win32" ? process.cwd() : os.tmpdir();
+  return path.join(base, `.workspace-security-${testId}`);
+}

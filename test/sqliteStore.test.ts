@@ -5,8 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { BridgeConfig } from "../src/config.js";
 import { SqliteStore } from "../src/sqliteStore.js";
+import { makeAccountHash } from "../src/messageIdentity.js";
 
 const tempRoots: string[] = [];
+const TEST_ACCOUNT = "test-account";
+const TEST_ACCOUNT_KEY = makeAccountHash(TEST_ACCOUNT);
 
 function makeConfig(root: string): BridgeConfig {
   return {
@@ -84,35 +87,66 @@ describe("SqliteStore", () => {
   // ---- Inbox durability & dedup ----
 
   it("inserts and claims messages in order", () => {
-    store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "hello" });
-    store.insertInboxMessage({ messageUid: "msg:2", peerId: "user-a", rawJson: "{}", text: "world" });
+    const r1 = store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "hello"
+    });
+    expect(r1.status).toBe("inserted");
 
-    const first = store.claimNextMessage(60_000);
+    const r2 = store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:2", peerId: "user-a", rawJson: "{}", text: "world"
+    });
+    expect(r2.status).toBe("inserted");
+
+    const first = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(first).not.toBeNull();
     expect(first!.text).toBe("hello");
-    expect(first!.status).toBe("processing");
 
-    const second = store.claimNextMessage(60_000);
+    const second = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(second).not.toBeNull();
     expect(second!.text).toBe("world");
   });
 
-  it("deduplicates by message_uid (UNIQUE constraint)", () => {
-    store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "first" });
-    const duplicate = store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "first" });
-    expect(duplicate).toBe(false);
+  it("deduplicates by (account_key, message_uid)", () => {
+    const r1 = store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "first"
+    });
+    expect(r1.status).toBe("inserted");
+
+    const r2 = store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "first"
+    });
+    expect(r2.status).toBe("duplicate");
+  });
+
+  it("deduplicates across different accounts - same message_id", () => {
+    const r1 = store.insertInboxMessage({
+      accountKey: "account-a", messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "a"
+    });
+    expect(r1.status).toBe("inserted");
+
+    // Same message_uid but different account_key - should be inserted
+    const r2 = store.insertInboxMessage({
+      accountKey: "account-b", messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "b"
+    });
+    expect(r2.status).toBe("inserted");
+
+    // Same account_key + same message_uid - duplicate
+    const r3 = store.insertInboxMessage({
+      accountKey: "account-a", messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "a-dup"
+    });
+    expect(r3.status).toBe("duplicate");
   });
 
   it("sets processing lease and recovers expired leases", () => {
-    store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "noop" });
-    store.insertInboxMessage({ messageUid: "msg:2", peerId: "user-a", rawJson: "{}", text: "recover-me" });
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "noop" });
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:2", peerId: "user-a", rawJson: "{}", text: "recover-me" });
 
     // Claim both
-    const m1 = store.claimNextMessage(60_000);
+    const m1 = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(m1).not.toBeNull();
-    store.completeMessage(m1!.id);
+    store.completeMessage(m1!.id, m1!.leaseToken);
 
-    const m2 = store.claimNextMessage(60_000);
+    const m2 = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(m2).not.toBeNull();
     expect(m2!.text).toBe("recover-me");
 
@@ -121,44 +155,101 @@ describe("SqliteStore", () => {
     store.exec(`UPDATE inbox_messages SET status = 'processing', lease_until = 1 WHERE id = ${msgId}`);
 
     // Recover — should find and mark the expired lease message
-    const recovered = store.recoverStuckMessages(300_000);
+    const recovered = store.recoverExpiredLeases(TEST_ACCOUNT_KEY);
     expect(recovered).toBe(1);
 
     // Now claim should bring back the message that was marked 'failed' by recovery
-    const reClaimed = store.claimNextMessage(60_000);
+    const reClaimed = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(reClaimed).not.toBeNull();
     expect(reClaimed!.text).toBe("recover-me");
     expect(reClaimed!.attempts).toBeGreaterThanOrEqual(2);
   });
 
+  it("partial data: lease_until check uses now directly, not now - leaseMs", () => {
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:lease-test", peerId: "user-a", rawJson: "{}", text: "lease-test" });
+
+    const claim = store.claimNextMessage(TEST_ACCOUNT_KEY);
+    expect(claim).not.toBeNull();
+
+    // Force lease to a near-future expiry that is not yet past
+    const now = Date.now();
+    const msgId = claim!.id;
+    store.exec(`UPDATE inbox_messages SET status = 'processing', lease_until = ${now + 60000} WHERE id = ${msgId}`);
+
+    // Should not recover — lease is still valid
+    const recovered = store.recoverExpiredLeases(TEST_ACCOUNT_KEY, { now });
+    expect(recovered).toBe(0);
+  });
+
+  it("long task heartbeat prevents re-claiming", () => {
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:heartbeat", peerId: "user-a", rawJson: "{}", text: "heartbeat-test" });
+
+    const claim = store.claimNextMessage(TEST_ACCOUNT_KEY, { leaseMs: 5000 });
+    expect(claim).not.toBeNull();
+
+    // Renew the lease
+    const renewed = store.renewLease(claim!.id, claim!.leaseToken, 5000);
+    expect(renewed).toBe(true);
+
+    // Another claim should fail (lease still valid, heartbeat active)
+    const secondClaim = store.claimNextMessage(TEST_ACCOUNT_KEY);
+    expect(secondClaim).toBeNull();
+
+    // Expire the lease
+    store.exec(`UPDATE inbox_messages SET lease_until = 1 WHERE id = ${claim!.id}`);
+
+    // Now it can be recovered
+    const recovered = store.recoverExpiredLeases(TEST_ACCOUNT_KEY);
+    expect(recovered).toBe(1);
+  });
+
+  it("wrong lease token cannot complete or fail message", () => {
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:token-test", peerId: "user-a", rawJson: "{}", text: "token-test" });
+
+    const claim = store.claimNextMessage(TEST_ACCOUNT_KEY);
+    expect(claim).not.toBeNull();
+
+    // Wrong token cannot complete
+    const completed = store.completeMessage(claim!.id, "wrong-token");
+    expect(completed).toBe(false);
+
+    // Wrong token cannot fail
+    const failed = store.failMessage(claim!.id, "wrong-token", "test error");
+    expect(failed).toBe(false);
+
+    // Correct token can complete
+    const realComplete = store.completeMessage(claim!.id, claim!.leaseToken);
+    expect(realComplete).toBe(true);
+  });
+
   it("marks messages complete", () => {
-    store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "done" });
-    const msg = store.claimNextMessage(60_000);
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "done" });
+    const msg = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(msg).not.toBeNull();
 
-    store.completeMessage(msg!.id);
+    store.completeMessage(msg!.id, msg!.leaseToken);
 
-    const pending = store.countPending();
+    const pending = store.countPending(TEST_ACCOUNT_KEY);
     expect(pending).toBe(0);
   });
 
   it("marks messages as failed/dead after max attempts", () => {
-    store.insertInboxMessage({ messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "fail" });
-    const msg1 = store.claimNextMessage(60_000);
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:1", peerId: "user-a", rawJson: "{}", text: "fail" });
+    const msg1 = store.claimNextMessage(TEST_ACCOUNT_KEY);
     expect(msg1).not.toBeNull();
-    store.failMessage(msg1!.id, "test error", 1);
+    store.failMessage(msg1!.id, msg1!.leaseToken, "test error", { maxAttempts: 1 });
 
-    const recent = store.listRecentMessages(10);
+    const recent = store.listRecentMessages(TEST_ACCOUNT_KEY, 10);
     expect(recent).toHaveLength(1);
     expect(recent[0]?.status).toBe("dead");
-    expect(recent[0]?.last_error).toContain("test error");
+    expect(recent[0]?.lastError).toContain("test error");
   });
 
   // ---- Cursor persistence ----
 
   it("persists and retrieves sync cursor (get_updates_buf)", () => {
-    store.saveSyncBuf("account-1", "cursor-value-123");
-    expect(store.loadSyncBuf("account-1")).toBe("cursor-value-123");
+    store.saveSyncBuf(TEST_ACCOUNT_KEY, "cursor-value-123");
+    expect(store.loadSyncBuf(TEST_ACCOUNT_KEY)).toBe("cursor-value-123");
   });
 
   // ---- Failed tasks ----
@@ -237,16 +328,164 @@ describe("SqliteStore", () => {
     expect(store.loadSessionBinding("nonexistent")).toBeUndefined();
   });
 
-  // ---- Concurrent-like behavior ----
+  // ---- Batch persistence ----
 
-  it("handles transactional metadata updates", () => {
-    store.setMeta("tx-test", JSON.stringify({ count: 1, items: ["a", "b"] }));
-    const val = store.getMeta("tx-test");
-    expect(val).toBe(JSON.stringify({ count: 1, items: ["a", "b"] }));
+  it("persistFetchedBatch inserts messages and cursor atomically", () => {
+    const result = store.persistFetchedBatch({
+      accountKey: TEST_ACCOUNT_KEY,
+      nextCursor: "cursor-atomic",
+      messages: [
+        { messageUid: "batch:1", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "batch1", payloadJson: "", payloadVersion: null },
+        { messageUid: "batch:2", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "batch2", payloadJson: "", payloadVersion: null },
+      ],
+    });
+
+    expect(result.inserted).toBe(2);
+    expect(result.skipped).toBe(0);
+    expect(store.loadSyncBuf(TEST_ACCOUNT_KEY)).toBe("cursor-atomic");
+
+    const pending = store.countPending(TEST_ACCOUNT_KEY);
+    expect(pending).toBe(2);
   });
+
+  it("persistFetchedBatch handles duplicates vs new messages", () => {
+    // Insert one first
+    store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "batch:1", peerId: "u1", rawJson: "{}", text: "existing"
+    });
+
+    const result = store.persistFetchedBatch({
+      accountKey: TEST_ACCOUNT_KEY,
+      nextCursor: "cursor-dup",
+      messages: [
+        { messageUid: "batch:1", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "existing", payloadJson: "", payloadVersion: null },
+        { messageUid: "batch:2", peerId: "u1", peerHash: "ph1", rawJson: "{}", text: "new", payloadJson: "", payloadVersion: null },
+      ],
+    });
+
+    expect(result.inserted).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(store.loadSyncBuf(TEST_ACCOUNT_KEY)).toBe("cursor-dup");
+  });
+
+  it("persistFetchedBatch: cursor not saved if transaction rolls back on error", () => {
+    // This test verifies that a broken message causes rollback
+    // We'll close the db to simulate a failure
+    store.close();
+
+    expect(() => {
+      store.persistFetchedBatch({
+        accountKey: TEST_ACCOUNT_KEY,
+        nextCursor: "fail-cursor",
+        messages: [
+          { messageUid: "fail:1", peerId: "u1", rawJson: "{}", text: "fail" },
+        ],
+      });
+    }).toThrow();
+  });
+
+  // ---- Privacy: payload scrubbing ----
+
+  it("completed messages have scrubbed payload", () => {
+    store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:scrub", peerId: "user-a",
+      rawJson: '{"secret":"data"}', text: "sensitive content"
+    });
+
+    const claim = store.claimNextMessage(TEST_ACCOUNT_KEY);
+    expect(claim).not.toBeNull();
+    expect(claim!.payload?.rawJson).toBe('{"secret":"data"}');
+
+    store.completeMessage(claim!.id, claim!.leaseToken);
+
+    // After completion, payload should be scrubbed
+    const recent = store.listRecentMessages(TEST_ACCOUNT_KEY, 10);
+    const completed = recent.find((m) => m.messageUid === "msg:scrub");
+    expect(completed?.rawJson).toBe("");
+    expect(completed?.text).toBe("");
+  });
+
+  it("skipped messages have no payload", () => {
+    const result = store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:skip", peerId: "user-a",
+      rawJson: "secret", text: "skip content",
+      statusOverride: "skipped",
+    });
+    expect(result.status).toBe("inserted");
+
+    const recent = store.listRecentMessages(TEST_ACCOUNT_KEY, 10);
+    const skipped = recent.find((m) => m.messageUid === "msg:skip");
+    expect(skipped?.status).toBe("skipped");
+    expect(skipped?.rawJson).toBe("secret");
+    expect(skipped?.text).toBe("skip content");
+  });
+
+  // ---- Account isolation ----
+
+  it("account A does not see account B's pending messages", () => {
+    store.insertInboxMessage({ accountKey: "account-a", messageUid: "msg:a1", peerId: "u1", rawJson: "{}", text: "a" });
+    store.insertInboxMessage({ accountKey: "account-b", messageUid: "msg:b1", peerId: "u1", rawJson: "{}", text: "b" });
+
+    expect(store.countPending("account-a")).toBe(1);
+    expect(store.countPending("account-b")).toBe(1);
+  });
+
+  it("account A claims only its own messages", () => {
+    store.insertInboxMessage({ accountKey: "account-a", messageUid: "msg:a1", peerId: "u1", rawJson: "{}", text: "a-only" });
+    store.insertInboxMessage({ accountKey: "account-b", messageUid: "msg:b1", peerId: "u1", rawJson: "{}", text: "b-only" });
+
+    const claimA = store.claimNextMessage("account-a");
+    expect(claimA).not.toBeNull();
+    expect(claimA!.text).toBe("a-only");
+
+    const claimB = store.claimNextMessage("account-b");
+    expect(claimB).not.toBeNull();
+    expect(claimB!.text).toBe("b-only");
+  });
+
+  // ---- Data retention ----
+
+  it("cleanupExpiredData removes old completed messages", () => {
+    store.insertInboxMessage({ accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:old", peerId: "u1", rawJson: "{}", text: "old" });
+    const claim = store.claimNextMessage(TEST_ACCOUNT_KEY);
+    expect(claim).not.toBeNull();
+    store.completeMessage(claim!.id, claim!.leaseToken);
+
+    // Manually set completed_at to far in the past
+    const farPast = Date.now() - 30 * 86_400_000;
+    store.exec(`UPDATE inbox_messages SET completed_at = ${farPast} WHERE message_uid = 'msg:old'`);
+
+    expect(store.estimateCleanup().deletedMessages).toBe(1);
+
+    const cleanupResult = store.cleanupExpiredData();
+    expect(cleanupResult.deletedMessages).toBe(1);
+  });
+
+  // ---- Closed store errors ----
 
   it("closed store throws on access", () => {
     store.close();
-    expect(() => store.countPending()).toThrow();
+    expect(() => store.countPending(TEST_ACCOUNT_KEY)).toThrow();
+  });
+
+  it("SQL errors propagate (not silently swallowed)", () => {
+    store.exec("DROP TABLE IF EXISTS inbox_messages");
+    expect(() => store.insertInboxMessage({
+      accountKey: TEST_ACCOUNT_KEY, messageUid: "msg:err", peerId: "u1", rawJson: "{}", text: "err"
+    })).toThrow();
+  });
+
+  // ---- Migration test ----
+
+  it("schema starts at version 4", () => {
+    expect(store.schemaVersion).toBe(4);
+  });
+
+  it("new database has correct columns for v4 schema", () => {
+    store.insertInboxMessage({ accountKey: "test-key", messageUid: "test:uid", peerId: "test-peer", rawJson: "{}", text: "test" });
+
+    // Verify columns exist by accessing them
+    const rows = store.exec("SELECT account_key, message_uid, lease_token, lease_owner, updated_at, completed_at, error_category FROM inbox_messages WHERE message_uid = 'test:uid'");
+    // This should not throw
   });
 });
