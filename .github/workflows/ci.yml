@@ -43,43 +43,44 @@ jobs:
       - name: Verify npm pack contents
         shell: bash
         run: |
-          mkdir -p "${{ runner.temp }}/npm-pack"
-          npm pack --pack-destination "${{ runner.temp }}/npm-pack"
-          tarball=$(ls "${{ runner.temp }}/npm-pack"/*.tgz)
-          mkdir -p "${{ runner.temp }}/pack-check"
-          tar -xzf "$tarball" -C "${{ runner.temp }}/pack-check"
+          pack_root=$(cygpath -u "${{ runner.temp }}")
+          mkdir -p "$pack_root/npm-pack"
+          npm pack --pack-destination "$pack_root/npm-pack"
+          tarball=$(ls "$pack_root/npm-pack"/*.tgz)
+          mkdir -p "$pack_root/pack-check"
+          tar -xzf "$tarball" -C "$pack_root/pack-check"
           echo "=== Pack contents ==="
-          find "${{ runner.temp }}/pack-check" -type f | sort
+          find "$pack_root/pack-check" -type f | sort
           echo "=== Validation ==="
           failures=0
-          if [ ! -f "${{ runner.temp }}/pack-check/package/dist/cli.js" ]; then
+          if [ ! -f "$pack_root/pack-check/package/dist/cli.js" ]; then
             echo "ERROR: dist/cli.js not in pack"
             failures=1
           else
             echo "✓ dist/cli.js"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/.env" ]; then
+          if [ -f "$pack_root/pack-check/package/.env" ]; then
             echo "ERROR: .env found in pack"
             failures=1
           else
             echo "✓ no .env"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/bridge.db" ]; then
+          if [ -f "$pack_root/pack-check/package/bridge.db" ]; then
             echo "ERROR: bridge.db in pack"
             failures=1
           else
             echo "✓ no bridge.db"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/README.md" ]; then
+          if [ -f "$pack_root/pack-check/package/README.md" ]; then
             echo "✓ README.md"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/README.en.md" ]; then
+          if [ -f "$pack_root/pack-check/package/README.en.md" ]; then
             echo "✓ README.en.md"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/LICENSE" ]; then
+          if [ -f "$pack_root/pack-check/package/LICENSE" ]; then
             echo "✓ LICENSE"
           fi
-          if [ -f "${{ runner.temp }}/pack-check/package/SECURITY.md" ]; then
+          if [ -f "$pack_root/pack-check/package/SECURITY.md" ]; then
             echo "✓ SECURITY.md"
           fi
           exit $failures
