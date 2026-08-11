@@ -9,10 +9,20 @@ assignees: ""
 ## Problem
 
 
+## Use case
+
+Who needs this, and what workflow is blocked today?
+
+
 ## Proposed behavior
 
 
 ## Alternatives considered
+
+
+## Scope and security impact
+
+Does this change authorization, session isolation, workspace access, stored message data, or local execution boundaries?
 
 
 ## Notes

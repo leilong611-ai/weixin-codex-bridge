@@ -1,10 +1,16 @@
 # Weixin Codex Bridge
 
+**Security-first, local-first WeChat bridge for Codex.**
+
 [![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-A standalone bridge that forwards WeChat messages to a local Codex Desktop or CLI instance with security and reliability guards.
+A focused bridge that connects WeChat messages to local Codex while preserving allowlists, session isolation, a workspace sandbox, and a recoverable SQLite inbox.
+
+`Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
+
+`WeChat → Authorization → Durable Inbox → Codex → WeChat`
 
 Chinese version: [README.md](./README.md)
 
@@ -21,7 +27,7 @@ This project creates a well-bounded bridge layer between the two:
 - Isolate each WeChat peer to a dedicated session key
 - Route authorized text messages to Codex Desktop or Codex CLI
 - Send execution results back to WeChat with safe reply splitting
-- Persist messages in a SQLite durable queue to prevent silent loss on restart
+- Persist messages in a SQLite durable queue to reduce silent-loss risk on restart
 - Enforce default security restrictions on the console, logs, workspace, and local data
 
 ## Architecture
@@ -63,7 +69,7 @@ Even with an allowlist configured, do not use `$HOME`, `.ssh`, `.codex`, browser
 
 - QR code login for WeChat bot accounts
 - Owner / allowed / readonly role authorization with command-level access control
-- Unknown users rejected by default — never leak internal state
+- Unknown users rejected by default with a generic response that does not disclose internal state
 - Deterministic session key per (account, peer) — no cross-user leakage
 - Codex Desktop automation (primary delivery mode)
 - Codex CLI mode (optional, with Desktop fallback on failure)
@@ -175,11 +181,19 @@ export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 
 ### Start the Bridge
 
+Complete QR login with the upstream Weixin/OpenClaw client first, then point `OPENCLAW_STATE_DIR` at the state root containing `openclaw-weixin/accounts.json`.
+
+Windows users can run the read-only preflight:
+
 ```bash
 npm run build
-npm start -- doctor
-npm start -- login
-npm start -- serve
+npm run setup-check
+```
+
+Once configuration and login state are ready:
+
+```bash
+npm start
 ```
 
 ## Tests
@@ -192,7 +206,7 @@ npm run public-check
 npm pack --dry-run --json
 ```
 
-27 test files, 250+ tests covering: SQLite operations, lease management, migrations, message identity, payload privacy, data retention, bridge routing, authorization, session isolation, console server, and desktop automation.
+CI runs 28 test files / 252 tests on Windows. Linux runs 27 files / 250 tests, with two Windows-only PowerShell integration tests skipped.
 
 ## Known Limitations
 
@@ -203,6 +217,12 @@ npm pack --dry-run --json
 - This project **cannot prevent** prompt injection attacks
 - This project **cannot guarantee** the safety of every command Codex generates
 - Git branches, code review, and backups are still recommended for production repositories
+
+## Scope
+
+The current scope is private WeChat text messages, one focused bridge, local Codex execution, and security-first routing.
+
+Media messages, group chat, and macOS/Linux CLI validation may be researched first. A multi-agent platform, universal IM gateway, hosted SaaS, and complete agent orchestration are out of scope.
 
 ## Security Recommendations
 

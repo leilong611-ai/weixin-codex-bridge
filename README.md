@@ -1,18 +1,20 @@
 # Weixin Codex Bridge
 
-一个将微信消息安全转发到本地 Codex Desktop 或 Codex CLI 的独立桥接器。
+**Security-first, local-first WeChat bridge for Codex.**
 
-适合想通过微信触发个人 Codex 工作流，又需要用户授权、会话隔离、沙箱限制、消息持久化和本地数据控制的用户。
+把微信消息安全地连接到本地 Codex，同时保留白名单、会话隔离、Workspace 沙箱和可恢复 SQLite 消息队列。
 
-> **重要说明：** 微信消息属于外部不可信输入。项目默认拒绝未授权用户，默认关闭高权限 Codex 参数和本地控制台。但使用者仍需为 Codex 配置独立工作目录，并理解本地自动执行带来的风险。
-
----
+`Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
 
 [![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
+`WeChat → Authorization → Durable Inbox → Codex → WeChat`
+
 English: [README.en.md](./README.en.md)
+
+> **重要说明：** 微信消息属于外部不可信输入。项目默认拒绝未授权用户，默认关闭高权限 Codex 参数和本地控制台。但使用者仍需为 Codex 配置独立工作目录，并理解本地自动执行带来的风险。
 
 ---
 
@@ -27,7 +29,7 @@ Codex 通常运行在电脑本地，而高频沟通入口往往在微信中。
 - 为不同微信会话建立隔离的本地 session
 - 将允许的文本消息交给 Codex Desktop 或 Codex CLI
 - 将执行结果安全回复到微信
-- 使用 SQLite 持久队列避免消息因程序重启而静默丢失
+- 使用 SQLite 持久队列降低程序重启时消息静默丢失的风险
 - 对控制台、日志、工作目录和本地数据实施默认安全限制
 
 ## 架构
@@ -203,23 +205,19 @@ export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 
 ### 启动
 
-先确认环境和登录态：
+先使用上游微信/OpenClaw 客户端完成二维码登录，并让 `OPENCLAW_STATE_DIR` 指向包含 `openclaw-weixin/accounts.json` 的状态目录。
+
+Windows 用户可先运行只读预检：
 
 ```bash
 npm run build
-npm start -- doctor
+npm run setup-check
 ```
 
-扫码登录：
+配置与登录态就绪后启动桥接器：
 
 ```bash
-npm start -- login
-```
-
-启动桥接器：
-
-```bash
-npm start -- serve
+npm start
 ```
 
 ## 测试
@@ -255,6 +253,12 @@ npm pack --dry-run --json
 - 本项目**不能消除** prompt injection
 - 本项目**不能保证** Codex 生成的每条命令都是安全的
 - 对重要仓库仍建议使用 Git 分支、代码审查和备份
+
+## 项目范围
+
+当前范围是微信私聊文本、单一聚焦桥接层、本地 Codex 执行和安全优先路由。
+
+媒体消息、群聊与 macOS/Linux CLI 模式可以先做设计或验证；多 agent 平台、通用 IM 网关、托管 SaaS 和完整 agent orchestration 不在项目范围内。
 
 ## 安全建议
 
