@@ -168,7 +168,10 @@ git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
 npm ci
 npm run build
+npm run doctor
 ```
+
+`npm run doctor` 是只读预检；它会检查 Node.js、Codex/微信状态路径、Workspace 沙箱、角色白名单、执行模式和隐私默认值，不会输出 token、peer ID 或 QR 数据。配置未就绪时以非零状态退出并给出修复建议。
 
 复制配置（注意：项目不会自动读取 `.env`，需要通过 shell 或进程管理器导出环境变量）：
 
@@ -210,7 +213,7 @@ export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 Windows 用户可先运行只读预检：
 
 ```bash
-npm run build
+npm run doctor
 npm run setup-check
 ```
 

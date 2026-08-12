@@ -2,10 +2,28 @@ import { loadBridgeConfig } from "./config.js";
 import { CodexWeixinBridge } from "./bridge.js";
 import { startConsoleServer } from "./consoleServer.js";
 import { requireAuthorizedStartup } from "./auth.js";
+import { buildConfigDiagnosticReport } from "./configDiagnostics.js";
 import { requireSecureWorkspace } from "./workspaceSecurity.js";
 
 async function main(): Promise<void> {
   const config = loadBridgeConfig();
+  const command = process.argv[2];
+
+  if (command === "help" || command === "--help" || command === "-h") {
+    console.log("Usage: node dist/cli.js [start|doctor|help]");
+    return;
+  }
+
+  if (command === "doctor") {
+    const report = buildConfigDiagnosticReport(config);
+    console.log(JSON.stringify(report, null, 2));
+    process.exitCode = report.ok ? 0 : 1;
+    return;
+  }
+
+  if (command && command !== "start") {
+    throw new Error(`Unknown command: ${command}. Run with help for supported commands.`);
+  }
 
   // ---- Security startup guards ----
   requireAuthorizedStartup(config);
