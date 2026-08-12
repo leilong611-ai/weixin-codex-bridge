@@ -6,7 +6,8 @@ describe("buildCmdProcessInvocation", () => {
   it("passes a .cmd path with spaces as a raw argv item", () => {
     const invocation = buildCmdProcessInvocation(
       "C:\\Users\\roy\\AppData\\Roaming\\npm\\codex.cmd",
-      ["exec", "-C", "C:\\Users\\roy\\Documents\\New project 4", "-"]
+      ["exec", "-C", "C:\\Users\\roy\\Documents\\New project 4", "-"],
+      "win32"
     );
 
     expect(invocation.file).toBe("cmd.exe");
@@ -21,5 +22,18 @@ describe("buildCmdProcessInvocation", () => {
       "-"
     ]);
     expect(invocation.args.join(" ")).not.toContain('\\"');
+  });
+
+  it("executes the Codex binary directly outside Windows", () => {
+    const invocation = buildCmdProcessInvocation(
+      "codex",
+      ["exec", "-C", "/var/tmp/project", "-"],
+      "linux"
+    );
+
+    expect(invocation).toEqual({
+      file: "codex",
+      args: ["exec", "-C", "/var/tmp/project", "-"]
+    });
   });
 });

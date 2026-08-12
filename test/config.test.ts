@@ -74,4 +74,14 @@ describe("loadBridgeConfig", () => {
 
     expect(loadBridgeConfig().maxParallelRuns).toBe(4);
   });
+
+  it("uses the platform-native Codex command by default", () => {
+    delete process.env.CODEX_CMD_PATH;
+    process.env.CODEX_WEIXIN_AUTO_DESKTOP_SESSION = "false";
+
+    const expected = process.platform === "win32"
+      ? path.join(process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming"), "npm", "codex.cmd")
+      : "codex";
+    expect(loadBridgeConfig().codexCmdPath).toBe(expected);
+  });
 });

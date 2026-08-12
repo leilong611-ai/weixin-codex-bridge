@@ -193,6 +193,15 @@ npm run doctor
 npm run setup-check
 ```
 
+macOS/Linux currently support the `codex-cli` path only, not Windows Desktop UI automation. Contributors can run a sanitized local validation that creates only a temporary workspace, empty account index, and fake Codex command; it does not connect to Weixin or execute Codex:
+
+```bash
+npm run build
+npm run validate:cli-only
+```
+
+Real operation still requires an installed Codex CLI, an isolated workspace, and existing Weixin/OpenClaw login state.
+
 Once configuration and login state are ready:
 
 ```bash
@@ -209,7 +218,7 @@ npm run public-check
 npm pack --dry-run --json
 ```
 
-CI runs 28 test files / 254 tests on Windows. Linux runs 27 files / 252 tests, with two Windows-only PowerShell integration tests skipped.
+CI runs 28 test files / 257 tests on Windows. Linux runs 27 files / 255 tests, with two Windows-only PowerShell integration tests skipped.
 
 ## Known Limitations
 

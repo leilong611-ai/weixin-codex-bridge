@@ -61,6 +61,23 @@ describe("buildConfigDiagnostics", () => {
     ]));
   });
 
+  it("finds a bare Codex command on PATH", () => {
+    const binDir = path.join("opt", "codex", "bin");
+    const config = {
+      ...makeConfig("C:\\work\\project"),
+      codexCmdPath: "codex",
+      deliveryMode: "codex-cli" as const
+    };
+    const checks = buildConfigDiagnostics(config, {
+      env: { PATH: binDir },
+      existsSync: (candidate) => candidate === path.join(binDir, "codex")
+    });
+
+    expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Codex command", ok: true, severity: "ok" })
+    ]));
+  });
+
   it("does not warn when legacy and current state roots are intentionally the same", () => {
     const config = makeConfig("C:\\work\\project");
     const checks = buildConfigDiagnostics(config, {
