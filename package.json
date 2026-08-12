@@ -29,6 +29,7 @@
     "start": "node dist/cli.js",
     "prestart": "npm run build",
     "test": "vitest",
+    "validate:cli-only": "node scripts/validate-cli-only.mjs",
     "login": "node src/cli.mjs login",
     "predoctor": "npm run build",
     "doctor": "node dist/cli.js doctor",

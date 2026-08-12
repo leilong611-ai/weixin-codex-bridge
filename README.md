@@ -217,6 +217,15 @@ npm run doctor
 npm run setup-check
 ```
 
+macOS/Linux 当前仅支持 `codex-cli` 路径，不支持 Windows Desktop UI 自动化。贡献者可运行完全脱敏的本地验证；它只创建临时 workspace、空账号索引和假 Codex 命令，不连接微信、不执行 Codex：
+
+```bash
+npm run build
+npm run validate:cli-only
+```
+
+真实运行时仍需要已安装的 Codex CLI、隔离 workspace 和已有微信/OpenClaw 登录态。
+
 配置与登录态就绪后启动桥接器：
 
 ```bash

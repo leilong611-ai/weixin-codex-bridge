@@ -91,6 +91,9 @@ export function loadBridgeConfig(): BridgeConfig {
     configuredRootEnv("CODEX_WEIXIN_STATE_ROOT") ??
     defaultBridgeStateRoot(home);
   const appData = process.env.APPDATA ?? path.join(home, "AppData", "Roaming");
+  const defaultCodexCommand = process.platform === "win32"
+    ? path.join(appData, "npm", "codex.cmd")
+    : "codex";
   const codexHome = process.env.CODEX_HOME ?? path.join(home, ".codex");
   const codexCwd = process.env.CODEX_WEIXIN_CWD ?? process.cwd();
   const autoDesktopSession = boolEnv("CODEX_WEIXIN_AUTO_DESKTOP_SESSION", true);
@@ -110,7 +113,7 @@ export function loadBridgeConfig(): BridgeConfig {
     allowUnconfiguredDevMode: boolEnv("CODEX_WEIXIN_ALLOW_UNCONFIGURED_DEV_MODE", false),
     autoDesktopSession,
     cliFallbackEnabled: boolEnv("CODEX_WEIXIN_CLI_FALLBACK", false),
-    codexCmdPath: process.env.CODEX_CMD_PATH ?? path.join(appData, "npm", "codex.cmd"),
+    codexCmdPath: process.env.CODEX_CMD_PATH ?? defaultCodexCommand,
     codexCwd,
     codexHome,
     codexModel: process.env.CODEX_WEIXIN_MODEL ?? "gpt-5.4-mini",

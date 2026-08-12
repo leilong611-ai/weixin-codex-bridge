@@ -197,17 +197,35 @@ export function buildConfigDiagnostics(
   }
 
   if (config.deliveryMode === "codex-cli" || config.cliFallbackEnabled) {
-    checks.push(pathCheck({
-      detail: `Codex command: ${config.codexCmdPath}`,
-      existsSync,
-      fix: "Install Codex CLI or set CODEX_CMD_PATH to the working codex.cmd path.",
+    const commandFound = commandExists(config.codexCmdPath, env, existsSync);
+    checks.push({
+      detail: commandFound
+        ? `Codex command: ${config.codexCmdPath}`
+        : `Codex command was not found: ${config.codexCmdPath}`,
+      fix: "Install Codex CLI or set CODEX_CMD_PATH to its executable path.",
       label: "Codex command",
-      path: config.codexCmdPath,
-      severity: "error"
-    }));
+      ok: commandFound,
+      severity: commandFound ? "ok" : "error"
+    });
   }
 
   return checks;
+}
+
+function commandExists(
+  command: string,
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+  existsSync: (candidate: string) => boolean
+): boolean {
+  if (path.isAbsolute(command) || command.includes("/") || command.includes("\\")) {
+    return existsSync(command);
+  }
+
+  const pathValue = env.PATH ?? env.Path ?? "";
+  return pathValue
+    .split(path.delimiter)
+    .filter(Boolean)
+    .some((directory) => existsSync(path.join(directory, command)));
 }
 
 function pathCheck(params: {
