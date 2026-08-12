@@ -2,6 +2,7 @@ import { existsSync as defaultExistsSync } from "node:fs";
 import path from "node:path";
 
 import type { BridgeConfig } from "./config.js";
+import { validateWorkspace, type WorkspaceValidation } from "./workspaceSecurity.js";
 
 export type ConfigDiagnosticSeverity = "error" | "ok" | "warn";
 
@@ -16,6 +17,24 @@ export interface ConfigDiagnosticCheck {
 export interface ConfigDiagnosticOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   existsSync?: (candidate: string) => boolean;
+  nodeVersion?: string;
+  validateWorkspace?: (config: BridgeConfig) => WorkspaceValidation;
+}
+
+export interface ConfigDiagnosticReport {
+  checks: ConfigDiagnosticCheck[];
+  ok: boolean;
+}
+
+export function buildConfigDiagnosticReport(
+  config: BridgeConfig,
+  options: ConfigDiagnosticOptions = {}
+): ConfigDiagnosticReport {
+  const checks = buildConfigDiagnostics(config, options);
+  return {
+    checks,
+    ok: !checks.some((check) => !check.ok && check.severity === "error")
+  };
 }
 
 export function buildConfigDiagnostics(
@@ -24,8 +43,19 @@ export function buildConfigDiagnostics(
 ): ConfigDiagnosticCheck[] {
   const env = options.env ?? process.env;
   const existsSync = options.existsSync ?? defaultExistsSync;
+  const nodeVersion = options.nodeVersion ?? process.versions.node;
+  const workspaceValidation = (options.validateWorkspace ?? validateWorkspace)(config);
   const checks: ConfigDiagnosticCheck[] = [];
   const accountIndexPath = path.join(config.openclawStateRoot, "openclaw-weixin", "accounts.json");
+
+  const nodeMajor = Number.parseInt(nodeVersion.split(".")[0] ?? "", 10);
+  checks.push({
+    detail: `Node.js ${nodeVersion}; required >=22.`,
+    fix: "Install Node.js 22 or newer.",
+    label: "Node.js version",
+    ok: Number.isFinite(nodeMajor) && nodeMajor >= 22,
+    severity: Number.isFinite(nodeMajor) && nodeMajor >= 22 ? "ok" : "error"
+  });
 
   checks.push(pathCheck({
     detail: `Workspace path: ${config.codexCwd}`,
@@ -35,6 +65,27 @@ export function buildConfigDiagnostics(
     path: config.codexCwd,
     severity: "error"
   }));
+
+  checks.push({
+    detail: workspaceValidation.ok
+      ? `Workspace security checks passed for ${workspaceValidation.resolvedPath}.`
+      : workspaceValidation.reason,
+    fix: "Use a dedicated workspace inside CODEX_WEIXIN_SANDBOX_ROOT and CODEX_WEIXIN_ALLOWED_WORKSPACE_ROOTS.",
+    label: "Workspace security",
+    ok: config.executionMode === "restricted" && workspaceValidation.ok,
+    severity: config.executionMode === "restricted" && workspaceValidation.ok ? "ok" : "error"
+  });
+
+  const sandboxConfigured = Boolean(config.sandboxRoot) || config.allowedWorkspaceRoots.length > 0;
+  checks.push({
+    detail: sandboxConfigured
+      ? `Sandbox root configured=${Boolean(config.sandboxRoot)}; allowed workspace roots=${config.allowedWorkspaceRoots.length}.`
+      : "No sandbox root or allowed workspace root is configured.",
+    fix: "Set CODEX_WEIXIN_SANDBOX_ROOT or CODEX_WEIXIN_ALLOWED_WORKSPACE_ROOTS to a dedicated project boundary.",
+    label: "Sandbox policy",
+    ok: sandboxConfigured,
+    severity: sandboxConfigured ? "ok" : "warn"
+  });
 
   checks.push({
     detail: path.isAbsolute(config.logRoot)
@@ -69,7 +120,52 @@ export function buildConfigDiagnostics(
     severity: "error"
   }));
 
+  const ownerConfigured = config.ownerPeerIds.length > 0;
+  checks.push({
+    detail: `${config.ownerPeerIds.length} owner, ${config.allowedPeerIds.length} allowed, ${config.readonlyPeerIds.length} readonly peer(s) configured.`,
+    fix: "Set CODEX_WEIXIN_OWNER_PEER_IDS to at least one trusted owner peer ID.",
+    label: "Role allowlists",
+    ok: ownerConfigured,
+    severity: ownerConfigured ? "ok" : config.allowUnconfiguredDevMode ? "warn" : "error"
+  });
+
+  checks.push({
+    detail: config.defaultDeny ? "Unknown peers are denied." : "Unknown peers are not denied by default.",
+    fix: "Set CODEX_WEIXIN_DEFAULT_DENY=true.",
+    label: "Default-deny",
+    ok: config.defaultDeny,
+    severity: config.defaultDeny ? "ok" : "error"
+  });
+
+  checks.push({
+    detail: `Execution mode: ${config.executionMode}; full-auto=${config.allowFullAuto}; skip-git-check=${config.allowSkipGitCheck}.`,
+    fix: "Use restricted mode with full-auto and skip-git-check disabled.",
+    label: "Execution safety",
+    ok: config.executionMode === "restricted" && !config.allowFullAuto && !config.allowSkipGitCheck,
+    severity: config.executionMode === "restricted" && !config.allowFullAuto && !config.allowSkipGitCheck ? "ok" : "error"
+  });
+
+  const privacyDefaults = config.logLevel === "minimal" &&
+    !config.transcriptEnabled &&
+    !config.storeFullPrompts;
+  checks.push({
+    detail: `log=${config.logLevel}; transcripts=${config.transcriptEnabled}; full-prompts=${config.storeFullPrompts}; retention=${config.dataRetentionDays} day(s).`,
+    fix: "Use minimal logging with transcripts and full-prompt storage disabled unless explicitly required.",
+    label: "Privacy defaults",
+    ok: privacyDefaults,
+    severity: privacyDefaults ? "ok" : "warn"
+  });
+
   if (config.deliveryMode === "desktop-ui") {
+    checks.push(pathCheck({
+      detail: `Codex state: ${config.codexHome}`,
+      existsSync,
+      fix: "Install and start Codex Desktop, or set CODEX_HOME to its state directory.",
+      label: "Codex Desktop state",
+      path: config.codexHome,
+      severity: "error"
+    }));
+
     checks.push(pathCheck({
       detail: `Input script: ${config.desktopInputScriptPath}`,
       existsSync,

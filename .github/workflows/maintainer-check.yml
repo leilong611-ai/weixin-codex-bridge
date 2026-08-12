@@ -23,11 +23,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify CLI help
-        run: node src/cli.mjs help
-
       - name: Verify doctor output shape
-        run: node src/cli.mjs doctor --workspace "$GITHUB_WORKSPACE"
+        run: |
+          report="${{ runner.temp }}/doctor.json"
+          npm run doctor --silent > "$report" || test "$?" -eq 1
+          node -e 'const fs=require("node:fs"); const report=JSON.parse(fs.readFileSync(process.argv[1], "utf8")); if (!Array.isArray(report.checks) || typeof report.ok !== "boolean") process.exit(1)' "$report"
+
+      - name: Verify CLI help
+        run: node dist/cli.js help
 
       - name: Verify maintainer docs exist
         run: |

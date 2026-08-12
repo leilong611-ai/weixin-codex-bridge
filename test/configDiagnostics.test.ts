@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { buildConfigDiagnostics } from "../src/configDiagnostics.js";
+import { buildConfigDiagnosticReport, buildConfigDiagnostics } from "../src/configDiagnostics.js";
 import type { BridgeConfig } from "../src/config.js";
 
 describe("buildConfigDiagnostics", () => {
@@ -72,6 +72,65 @@ describe("buildConfigDiagnostics", () => {
     });
 
     expect(checks.some((check) => check.label === "State root precedence")).toBe(false);
+  });
+
+  it("reports a safe first-run configuration without exposing peer IDs or tokens", () => {
+    const config = {
+      ...makeConfig("C:\\work\\project"),
+      ownerPeerIds: ["wxid_secret_owner"],
+      allowedPeerIds: ["wxid_secret_allowed"]
+    };
+    const report = buildConfigDiagnosticReport(config, {
+      env: {},
+      existsSync: () => true,
+      nodeVersion: "22.18.0",
+      validateWorkspace: () => ({
+        allowedWorkspaceRoots: [],
+        ok: true,
+        reason: "ok",
+        resolvedPath: config.codexCwd
+      })
+    });
+    const output = JSON.stringify(report);
+
+    expect(report.ok).toBe(true);
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Node.js version", ok: true }),
+      expect.objectContaining({ label: "Workspace security", ok: true }),
+      expect.objectContaining({ label: "Sandbox policy", severity: "warn" }),
+      expect.objectContaining({ label: "Role allowlists", ok: true }),
+      expect.objectContaining({ label: "Default-deny", ok: true }),
+      expect.objectContaining({ label: "Execution safety", ok: true }),
+      expect.objectContaining({ label: "Privacy defaults", ok: true })
+    ]));
+    expect(output).not.toContain("wxid_secret_owner");
+    expect(output).not.toContain("wxid_secret_allowed");
+    expect(output).not.toContain(config.consoleToken);
+  });
+
+  it("reports actionable errors for an unsafe unconfigured checkout", () => {
+    const config = {
+      ...makeConfig("C:\\missing-project"),
+      allowUnconfiguredDevMode: false
+    };
+    const report = buildConfigDiagnosticReport(config, {
+      env: {},
+      existsSync: () => false,
+      nodeVersion: "20.19.0",
+      validateWorkspace: () => ({
+        allowedWorkspaceRoots: [],
+        ok: false,
+        reason: "Workspace is outside the sandbox root.",
+        resolvedPath: config.codexCwd
+      })
+    });
+
+    expect(report.ok).toBe(false);
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Node.js version", ok: false, severity: "error" }),
+      expect.objectContaining({ label: "Workspace security", ok: false, severity: "error" }),
+      expect.objectContaining({ label: "Role allowlists", ok: false, severity: "error" })
+    ]));
   });
 });
 

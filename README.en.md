@@ -158,7 +158,10 @@ git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
 npm ci
 npm run build
+npm run doctor
 ```
+
+`npm run doctor` is a read-only preflight for Node.js, Codex/Weixin state paths, workspace sandboxing, role allowlists, execution mode, and privacy defaults. It never prints tokens, peer IDs, or QR data. Incomplete configuration produces actionable output and a non-zero exit status.
 
 **Note:** The project does not read `.env` automatically. Export variables via shell or process manager.
 
@@ -186,7 +189,7 @@ Complete QR login with the upstream Weixin/OpenClaw client first, then point `OP
 Windows users can run the read-only preflight:
 
 ```bash
-npm run build
+npm run doctor
 npm run setup-check
 ```
 
@@ -206,7 +209,7 @@ npm run public-check
 npm pack --dry-run --json
 ```
 
-CI runs 28 test files / 252 tests on Windows. Linux runs 27 files / 250 tests, with two Windows-only PowerShell integration tests skipped.
+CI runs 28 test files / 254 tests on Windows. Linux runs 27 files / 252 tests, with two Windows-only PowerShell integration tests skipped.
 
 ## Known Limitations
 
