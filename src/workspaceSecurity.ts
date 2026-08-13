@@ -64,6 +64,17 @@ function failed(
 
 export function validateWorkspace(config: BridgeConfig): WorkspaceValidation {
   const lexicalPath = path.resolve(config.codexCwd);
+  for (const forbidden of FORBIDDEN_DIRS) {
+    const lexicalForbidden = path.resolve(forbidden);
+    if (isInside(lexicalPath, lexicalForbidden)) {
+      return failed(
+        config,
+        lexicalPath,
+        `Workspace resolves inside a forbidden directory: ${forbidden}`
+      );
+    }
+  }
+
   let realPath: string;
   try {
     realPath = resolveExistingPath(config.codexCwd, "Workspace");
@@ -72,11 +83,6 @@ export function validateWorkspace(config: BridgeConfig): WorkspaceValidation {
   }
 
   for (const forbidden of FORBIDDEN_DIRS) {
-    const lexicalForbidden = path.resolve(forbidden);
-    if (isInside(lexicalPath, lexicalForbidden)) {
-      return failed(config, realPath, `Workspace resolves inside a forbidden directory: ${forbidden}`);
-    }
-
     try {
       const realForbidden = resolveExistingPath(forbidden, "Forbidden directory");
       if (isInside(realPath, realForbidden)) {
