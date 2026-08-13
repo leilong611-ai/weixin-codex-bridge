@@ -15,7 +15,7 @@ describe("buildConfigDiagnostics", () => {
 
     expect(checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "Codex workspace", ok: false, severity: "error" }),
-      expect.objectContaining({ label: "Weixin account index", ok: false, severity: "error" }),
+      expect.objectContaining({ label: "Weixin account state", ok: false, severity: "error" }),
       expect.objectContaining({ label: "Desktop input script", ok: false, severity: "error" }),
       expect.objectContaining({ label: "Desktop model script", ok: false, severity: "error" })
     ]));
@@ -78,6 +78,25 @@ describe("buildConfigDiagnostics", () => {
     ]));
   });
 
+  it("accepts a bridge-managed account directory without OpenClaw state", () => {
+    const config = makeConfig("C:\\work\\project");
+    const localDirectory = path.join(config.logRoot, "weixin-accounts", "accounts");
+    const checks = buildConfigDiagnostics(config, {
+      env: {},
+      existsSync: (candidate) => candidate === localDirectory,
+      listDirectory: (candidate) => candidate === localDirectory ? ["placeholder.json"] : []
+    });
+
+    expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        detail: expect.stringContaining("Bridge account directory"),
+        label: "Weixin account state",
+        ok: true,
+        severity: "ok"
+      })
+    ]));
+  });
+
   it("does not warn when legacy and current state roots are intentionally the same", () => {
     const config = makeConfig("C:\\work\\project");
     const checks = buildConfigDiagnostics(config, {
@@ -114,7 +133,7 @@ describe("buildConfigDiagnostics", () => {
     expect(report.checks).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: "Node.js version", ok: true }),
       expect.objectContaining({ label: "Workspace security", ok: true }),
-      expect.objectContaining({ label: "Sandbox policy", severity: "warn" }),
+      expect.objectContaining({ label: "Sandbox policy", severity: "ok" }),
       expect.objectContaining({ label: "Role allowlists", ok: true }),
       expect.objectContaining({ label: "Default-deny", ok: true }),
       expect.objectContaining({ label: "Execution safety", ok: true }),
@@ -182,7 +201,7 @@ function makeConfig(root: string): BridgeConfig {
     resumeLast: true,
     skipBacklogOnStart: true,
     weixinChannelVersion: "2.1.1",
-    sandboxRoot: "",
+    sandboxRoot: root,
     allowedWorkspaceRoots: [],
     executionMode: "restricted",
     allowFullAuto: false,

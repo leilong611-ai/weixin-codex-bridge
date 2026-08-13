@@ -1,15 +1,36 @@
 {
   "name": "weixin-codex-bridge",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Standalone Weixin to Codex bridge with security and reliability guards",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "wechat",
+    "weixin",
+    "bridge",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leilong611-ai/weixin-codex-bridge.git"
+  },
+  "homepage": "https://github.com/leilong611-ai/weixin-codex-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/leilong611-ai/weixin-codex-bridge/issues"
+  },
   "engines": {
     "node": ">=22"
   },
   "main": "dist/cli.js",
+  "bin": {
+    "weixin-codex-bridge": "dist/cli.js"
+  },
   "files": [
+    ".env.example",
     "dist/",
+    "docs/threat-model-walkthrough.md",
     "scripts/Install-CodexWeixinCompanionShortcut.ps1",
     "scripts/Launch-CodexWithWeixinBridge-Hidden.vbs",
     "scripts/Send-CodexDesktopInput.ps1",
@@ -21,6 +42,7 @@
     "scripts/Watch-CodexWeixinBridge.ps1",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
     "LICENSE",
     "SECURITY.md"
   ],
@@ -30,17 +52,23 @@
     "prestart": "npm run build",
     "test": "vitest",
     "validate:cli-only": "node scripts/validate-cli-only.mjs",
-    "login": "node src/cli.mjs login",
+    "prelogin": "npm run build",
+    "login": "node dist/cli.js login",
+    "preaccounts": "npm run build",
+    "accounts": "node dist/cli.js accounts",
+    "prelogout": "npm run build",
+    "logout": "node dist/cli.js logout",
     "predoctor": "npm run build",
     "doctor": "node dist/cli.js doctor",
     "setup-check": "powershell -ExecutionPolicy Bypass -File scripts/Test-CodexWeixinSetup.ps1",
     "public-check": "node scripts/public-check.mjs",
-    "prepublishOnly": "npm run build && npm test -- --run && npm run public-check",
-    "pack:verify": "npm pack --dry-run --json 2>&1"
+    "release:metadata": "node scripts/verify-release-metadata.mjs",
+    "release:verify": "npm run release:metadata && npm run build && npm test -- --run && npm run public-check && npm run pack:verify",
+    "prepublishOnly": "npm run release:verify",
+    "pack:verify": "node scripts/verify-pack.mjs"
   },
   "dependencies": {
     "acpx": "0.3.1",
-    "qrcode": "1.5.4",
     "qrcode-terminal": "0.12.0"
   },
   "devDependencies": {

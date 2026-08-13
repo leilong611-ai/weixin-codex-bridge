@@ -84,4 +84,20 @@ describe("loadBridgeConfig", () => {
       : "codex";
     expect(loadBridgeConfig().codexCmdPath).toBe(expected);
   });
+
+  it("resolves bundled Desktop scripts from the installed package, not the caller cwd", () => {
+    delete process.env.CODEX_WEIXIN_DESKTOP_INPUT_SCRIPT;
+    delete process.env.CODEX_WEIXIN_DESKTOP_MODEL_SCRIPT;
+    process.env.CODEX_WEIXIN_AUTO_DESKTOP_SESSION = "false";
+
+    const config = loadBridgeConfig();
+    expect(config.desktopInputScriptPath).toBe(path.resolve(
+      "scripts",
+      "Send-CodexDesktopInput.ps1"
+    ));
+    expect(config.desktopModelScriptPath).toBe(path.resolve(
+      "scripts",
+      "Set-CodexDesktopModel.ps1"
+    ));
+  });
 });

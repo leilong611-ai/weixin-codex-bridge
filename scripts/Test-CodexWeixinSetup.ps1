@@ -4,7 +4,7 @@ param(
 
     [string]$CodexWorkspace,
 
-    [string]$StateRoot = "D:\OpenClawWorkspace\tmp\codex-weixin-bridge",
+    [string]$StateRoot,
 
     [string]$OpenClawStateRoot,
 
@@ -15,6 +15,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+    $StateRoot = $env:CODEX_WEIXIN_STATE_ROOT
+    if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+        $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+        $StateRoot = Join-Path $localAppData "codex-weixin-bridge"
+    }
+}
 
 # This setup probe is read-only: it reports paths and health checks, but does not write credentials.
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
@@ -55,6 +63,7 @@ function Resolve-DisplayPath {
 
 $resolvedProjectRoot = Resolve-DisplayPath -Path $ProjectRoot
 $resolvedCodexWorkspace = Resolve-DisplayPath -Path $CodexWorkspace
+$resolvedStateRoot = Resolve-DisplayPath -Path $StateRoot
 $resolvedOpenClawStateRoot = Resolve-DisplayPath -Path $OpenClawStateRoot
 $checks = @()
 
@@ -124,7 +133,18 @@ $packageJsonPath = Join-Path $resolvedProjectRoot "package.json"
 $cliPath = Join-Path $resolvedProjectRoot "dist\cli.js"
 $inputScriptPath = Join-Path $resolvedProjectRoot "scripts\Send-CodexDesktopInput.ps1"
 $modelScriptPath = Join-Path $resolvedProjectRoot "scripts\Set-CodexDesktopModel.ps1"
-$accountIndexPath = Join-Path $resolvedOpenClawStateRoot "openclaw-weixin\accounts.json"
+$bridgeAccountDirectory = Join-Path $resolvedStateRoot "weixin-accounts\accounts"
+$openClawAccountIndexPath = Join-Path $resolvedOpenClawStateRoot "openclaw-weixin\accounts.json"
+$accountStatePath = $bridgeAccountDirectory
+$accountStateSource = "bridge"
+if (-not (Test-Path -LiteralPath $bridgeAccountDirectory)) {
+    $accountStatePath = $openClawAccountIndexPath
+    $accountStateSource = "openclaw"
+}
+if (-not (Test-Path -LiteralPath $accountStatePath)) {
+    $accountStatePath = $bridgeAccountDirectory
+    $accountStateSource = "missing"
+}
 
 Add-Check `
     -Name "Bridge project root" `
@@ -145,7 +165,7 @@ Add-Check `
     -Ok ([System.IO.Path]::IsPathRooted($StateRoot)) `
     -Severity "error" `
     -Detail $StateRoot `
-    -Fix "Set CODEX_WEIXIN_STATE_ROOT to an absolute local runtime directory, for example D:\OpenClawWorkspace\tmp\codex-weixin-bridge."
+    -Fix "Set CODEX_WEIXIN_STATE_ROOT to an absolute local runtime directory."
 
 Add-Check `
     -Name "Built bridge entry dist\cli.js" `
@@ -169,31 +189,36 @@ Add-Check `
     -Fix "Install npm with Node.js and reopen PowerShell."
 
 Add-Check `
-    -Name "OPENCLAW_STATE_DIR account index" `
-    -Ok (Test-Path -LiteralPath $accountIndexPath) `
+    -Name "Weixin account state" `
+    -Ok (Test-Path -LiteralPath $accountStatePath) `
     -Severity "error" `
-    -Detail $accountIndexPath `
-    -Fix "Finish Weixin/OpenClaw login, then set OPENCLAW_STATE_DIR to the root containing openclaw-weixin\accounts.json."
+    -Detail "$accountStateSource`: $accountStatePath" `
+    -Fix "Run npm run login, or set OPENCLAW_STATE_DIR to an existing root containing openclaw-weixin\accounts.json."
 
 $accountCount = 0
-if (Test-Path -LiteralPath $accountIndexPath) {
+if (Test-Path -LiteralPath $accountStatePath) {
     try {
-        $parsedAccounts = @(Get-Content -LiteralPath $accountIndexPath -Raw -Encoding UTF8 | ConvertFrom-Json)
-        $accountCount = $parsedAccounts.Count
+        if ($accountStateSource -eq "bridge") {
+            $accountCount = @(Get-ChildItem -LiteralPath $accountStatePath -Filter "*.json" -File).Count
+        }
+        else {
+            $parsedAccounts = @(Get-Content -LiteralPath $accountStatePath -Raw -Encoding UTF8 | ConvertFrom-Json)
+            $accountCount = $parsedAccounts.Count
+        }
         Add-Check `
             -Name "Weixin account count" `
             -Ok ($accountCount -gt 0) `
             -Severity "error" `
             -Detail "$accountCount account(s)" `
-            -Fix "Log in at least one Weixin/OpenClaw bot account."
+            -Fix "Run npm run login, or configure at least one compatible OpenClaw Weixin account."
     }
     catch {
         Add-Check `
-            -Name "Weixin account index JSON" `
+            -Name "Weixin account state" `
             -Ok $false `
             -Severity "error" `
             -Detail $_.Exception.Message `
-            -Fix "Recreate or repair the local openclaw-weixin account index."
+            -Fix "Recreate the bridge login with npm run login, or repair the compatible OpenClaw account index."
     }
 }
 
@@ -324,7 +349,7 @@ $suggestedEnv = [ordered]@{
     CODEX_WEIXIN_CWD                  = $resolvedCodexWorkspace
     CODEX_WEIXIN_STATE_ROOT           = $StateRoot
     CODEX_WEIXIN_LOG_ROOT             = $StateRoot
-    OPENCLAW_STATE_DIR                = $resolvedOpenClawStateRoot
+    OPENCLAW_STATE_DIR                = $(if ($accountStateSource -eq "openclaw") { $resolvedOpenClawStateRoot } else { $null })
     CODEX_WEIXIN_DELIVERY_MODE        = "desktop-ui"
     CODEX_WEIXIN_CLI_FALLBACK         = "false"
     CODEX_WEIXIN_CONSOLE_PORT         = "$ConsolePort"
@@ -341,9 +366,10 @@ $result = [ordered]@{
     ok                    = ($errorCount -eq 0)
     projectRoot           = $resolvedProjectRoot
     codexWorkspace        = $resolvedCodexWorkspace
-    stateRoot             = $StateRoot
+    stateRoot             = $resolvedStateRoot
     openClawStateRoot     = $resolvedOpenClawStateRoot
-    accountIndexPath      = $accountIndexPath
+    accountStatePath      = $accountStatePath
+    accountStateSource    = $accountStateSource
     accountCount          = $accountCount
     bridgeProcessCount    = $bridgeProcesses.Count
     codexWindowCount      = $codexWindows.Count

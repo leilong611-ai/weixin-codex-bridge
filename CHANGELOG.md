@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.4.0 — 2026-08-13
+
+### Added
+
+- **Standalone TypeScript QR login** — `npm run login` now renders a WeChat QR code in the terminal and saves confirmed credentials directly to the private bridge state directory.
+- **Account lifecycle CLI** — `login`, `accounts`, `logout`, `doctor`, `start`, `version`, and `help` now share one TypeScript entry point and an installable `weixin-codex-bridge` bin command.
+- **Private local account store** — each account file uses atomic replacement; account discovery uses the credential directory instead of a shared mutable index; POSIX directories use mode 0700 and files use mode 0600.
+- **OpenClaw state compatibility** — existing `openclaw-weixin` accounts remain readable without migration. Local bridge state takes precedence, and `logout` never deletes OpenClaw-managed credentials.
+- **Threat-model walkthrough** — an end-to-end reviewer guide covers authorization, account/session isolation, SQLite lifecycle, leases, workspace checks, and residual risks.
+- **Release verification workflow** — an explicit pre-tag workflow verifies matching versions, dated changelog metadata, green `main` checks, full tests, public-check, Linux CLI-only validation, and installed-package checks on Windows and Linux.
+
+### Changed
+
+- Consolidated the runtime on TypeScript and removed the disconnected legacy `.mjs` implementation.
+- Replaced duplicated platform-specific package checks with one cross-platform extracted-package verifier.
+- Added repository metadata, CLI package metadata, `.env.example`, changelog, and threat-model documentation to the private package artifact.
+
+### Security
+
+- QR payloads are no longer written to image files or printed as URLs.
+- HTTP login errors no longer echo upstream response bodies that could contain credentials.
+- Account IDs used as filenames are validated to prevent path traversal.
+- All stored Weixin endpoints require HTTPS without embedded credentials before bearer tokens can be used.
+- Restricted workspaces require an explicit boundary and are checked using case-correct real paths to block symlink escape.
+- Runtime HTTP errors omit upstream response bodies so unexpected private content cannot enter launcher logs.
+- Existing default-deny, sandbox, full-auto, skip-git-check, privacy, and Windows CI policies remain unchanged.
+
 ## v0.3.0 — 2026-08-11
 
 ### Added

@@ -1,19 +1,15 @@
 /**
  * Workspace path security for Weixin Codex Bridge.
  *
- * Ensures Codex only runs in approved sandbox workspaces and rejects
- * symlink escape, homedir leaks, and credential-directory access.
+ * Restricted mode fails closed unless Codex runs inside at least one explicit,
+ * real filesystem boundary.
  */
 
-import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 
 import type { BridgeConfig } from "./config.js";
-
-// ---------------------------------------------------------------------------
-// Paths that are NEVER acceptable as a Codex workspace
-// ---------------------------------------------------------------------------
 
 const FORBIDDEN_DIRS: string[] = [
   os.homedir(),
@@ -25,12 +21,8 @@ const FORBIDDEN_DIRS: string[] = [
   process.env.LOCALAPPDATA ?? "",
   process.env.APPDATA ?? "",
   process.env.TEMP ?? "",
-  process.env.TMP ?? "",
+  process.env.TMP ?? ""
 ].filter(Boolean);
-
-// ---------------------------------------------------------------------------
-// Workspace validation
-// ---------------------------------------------------------------------------
 
 export interface WorkspaceValidation {
   allowedWorkspaceRoots: string[];
@@ -39,116 +31,124 @@ export interface WorkspaceValidation {
   reason: string;
 }
 
-/**
- * Validate a workspace path against security rules.
- *
- * 1. Reject forbidden directories (home, .codex, .ssh, credentials, temp).
- * 2. Reject symlink-based escape.
- * 3. Reject paths outside the sandboxRoot (if set).
- * 4. Reject paths outside allowedWorkspaceRoots (if set).
- */
-export function validateWorkspace(config: BridgeConfig): WorkspaceValidation {
-  const resolvedPath = path.resolve(config.codexCwd);
-  const normPath = resolvedPath.toLowerCase();
+function comparable(candidate: string): string {
+  return process.platform === "win32" ? candidate.toLowerCase() : candidate;
+}
 
-  // Check forbidden directories
-  for (const forbidden of FORBIDDEN_DIRS) {
-    if (!forbidden) continue;
-    const normForbidden = path.resolve(forbidden).toLowerCase();
-    if (normPath === normForbidden || normPath.startsWith(normForbidden + path.sep)) {
-      return {
-        allowedWorkspaceRoots: config.allowedWorkspaceRoots,
-        ok: false,
-        resolvedPath,
-        reason: `Workspace resolves inside a forbidden directory: ${forbidden}`,
-      };
-    }
-  }
+function isInside(candidate: string, root: string): boolean {
+  const relative = path.relative(comparable(root), comparable(candidate));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
 
-  // Symlink escape check: the resolved realpath must match the resolved path
-  // (if the path has symlinks, the real location shouldn't be outside the intended tree)
+function resolveExistingPath(candidate: string, label: string): string {
+  const resolved = path.resolve(candidate);
   try {
-    const realPath = fs.realpathSync(resolvedPath);
-    // If the project root itself is a symlink, resolve it
-    const cwdReal = fs.realpathSync(process.cwd());
-    const normReal = realPath.toLowerCase();
-    const forbiddenReal = FORBIDDEN_DIRS.map((d) => {
-      try {
-        return fs.realpathSync(d).toLowerCase();
-      } catch {
-        return "";
-      }
-    }).filter(Boolean);
-    for (const fr of forbiddenReal) {
-      if (normReal === fr || normReal.startsWith(fr + path.sep)) {
-        return {
-          allowedWorkspaceRoots: config.allowedWorkspaceRoots,
-          ok: false,
-          resolvedPath: realPath,
-          reason: `Workspace symlink resolves into a forbidden directory: ${realPath}`,
-        };
-      }
-    }
+    return fs.realpathSync.native(resolved);
   } catch {
-    // realpathSync fails on non-existent paths — the path check will catch it
+    throw new Error(`${label} does not resolve to an existing path: ${resolved}`);
+  }
+}
+
+function failed(
+  config: BridgeConfig,
+  resolvedPath: string,
+  reason: string
+): WorkspaceValidation {
+  return {
+    allowedWorkspaceRoots: config.allowedWorkspaceRoots,
+    ok: false,
+    reason,
+    resolvedPath
+  };
+}
+
+export function validateWorkspace(config: BridgeConfig): WorkspaceValidation {
+  const lexicalPath = path.resolve(config.codexCwd);
+  let realPath: string;
+  try {
+    realPath = resolveExistingPath(config.codexCwd, "Workspace");
+  } catch (error) {
+    return failed(config, lexicalPath, error instanceof Error ? error.message : String(error));
   }
 
-  // Sandbox root check
-  if (config.sandboxRoot) {
-    const sandboxNorm = path.resolve(config.sandboxRoot).toLowerCase();
-    if (!normPath.startsWith(sandboxNorm + path.sep) && normPath !== sandboxNorm) {
-      return {
-        allowedWorkspaceRoots: config.allowedWorkspaceRoots,
-        ok: false,
-        resolvedPath,
-        reason: `Workspace is outside the sandbox root: ${config.sandboxRoot}`,
-      };
+  for (const forbidden of FORBIDDEN_DIRS) {
+    const lexicalForbidden = path.resolve(forbidden);
+    if (isInside(lexicalPath, lexicalForbidden)) {
+      return failed(config, realPath, `Workspace resolves inside a forbidden directory: ${forbidden}`);
+    }
+
+    try {
+      const realForbidden = resolveExistingPath(forbidden, "Forbidden directory");
+      if (isInside(realPath, realForbidden)) {
+        return failed(config, realPath, `Workspace real path is inside a forbidden directory: ${realForbidden}`);
+      }
+    } catch {
+      // A missing forbidden directory cannot contain the existing workspace.
     }
   }
 
-  // Allowed workspace roots check
+  if (!config.sandboxRoot && config.allowedWorkspaceRoots.length === 0) {
+    return failed(
+      config,
+      realPath,
+      "Restricted mode requires CODEX_WEIXIN_SANDBOX_ROOT or CODEX_WEIXIN_ALLOWED_WORKSPACE_ROOTS."
+    );
+  }
+
+  if (config.sandboxRoot) {
+    let sandboxReal: string;
+    try {
+      sandboxReal = resolveExistingPath(config.sandboxRoot, "Sandbox root");
+    } catch (error) {
+      return failed(config, realPath, error instanceof Error ? error.message : String(error));
+    }
+    if (!isInside(realPath, sandboxReal)) {
+      return failed(config, realPath, `Workspace is outside the sandbox root: ${sandboxReal}`);
+    }
+  }
+
   if (config.allowedWorkspaceRoots.length > 0) {
-    const withinAllowed = config.allowedWorkspaceRoots.some((root) => {
-      const normRoot = path.resolve(root).toLowerCase();
-      return normPath === normRoot || normPath.startsWith(normRoot + path.sep);
-    });
-    if (!withinAllowed) {
-      return {
-        allowedWorkspaceRoots: config.allowedWorkspaceRoots,
-        ok: false,
-        resolvedPath,
-        reason: `Workspace is not inside any allowed workspace root: ${config.allowedWorkspaceRoots.join(", ")}`,
-      };
+    let allowedRoots: string[];
+    try {
+      allowedRoots = config.allowedWorkspaceRoots.map((root) =>
+        resolveExistingPath(root, "Allowed workspace root")
+      );
+    } catch (error) {
+      return failed(config, realPath, error instanceof Error ? error.message : String(error));
+    }
+    if (!allowedRoots.some((root) => isInside(realPath, root))) {
+      return failed(
+        config,
+        realPath,
+        `Workspace is not inside any allowed workspace root: ${allowedRoots.join(", ")}`
+      );
     }
   }
 
   return {
     allowedWorkspaceRoots: config.allowedWorkspaceRoots,
     ok: true,
-    resolvedPath,
     reason: "ok",
+    resolvedPath: realPath
   };
 }
 
 export function requireSecureWorkspace(config: BridgeConfig): void {
   if (config.executionMode === "high-risk") {
-    // Only log a warning in high-risk mode
     console.warn(
-      "⚠️  CODEX_WEIXIN_EXECUTION_MODE=high-risk — workspace security checks are bypassed.",
+      "⚠️  CODEX_WEIXIN_EXECUTION_MODE=high-risk — workspace security checks are bypassed."
     );
     return;
   }
 
   const validation = validateWorkspace(config);
   if (!validation.ok) {
-    throw new Error(
-      [
-        `Workspace security check failed: ${validation.reason}`,
-        "",
-        `Resolved path: ${validation.resolvedPath}`,
-        "Set CODEX_WEIXIN_SANDBOX_ROOT to an isolated directory, or",
-        "set CODEX_WEIXIN_EXECUTION_MODE=high-risk to bypass (not recommended).",
-      ].join("\n"),
-    );
+    throw new Error([
+      `Workspace security check failed: ${validation.reason}`,
+      "",
+      `Resolved path: ${validation.resolvedPath}`,
+      "Set CODEX_WEIXIN_SANDBOX_ROOT to an isolated directory, or",
+      "set CODEX_WEIXIN_EXECUTION_MODE=high-risk to bypass (not recommended)."
+    ].join("\n"));
   }
 }

@@ -2,7 +2,7 @@
 param(
     [string]$ProjectRoot,
 
-    [string]$StateRoot = "D:\OpenClawWorkspace\tmp\codex-weixin-bridge",
+    [string]$StateRoot,
 
     [int]$IntervalSeconds = 30,
 
@@ -13,6 +13,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+    $StateRoot = $env:CODEX_WEIXIN_STATE_ROOT
+    if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+        $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+        $StateRoot = Join-Path $localAppData "codex-weixin-bridge"
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path

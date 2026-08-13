@@ -1,8 +1,11 @@
 import os from "node:os";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { findLatestDesktopSessionId } from "./codexSession.js";
+
+const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export interface BridgeConfig {
   accountId?: string;
@@ -123,9 +126,9 @@ export function loadBridgeConfig(): BridgeConfig {
     consoleToken,
     deliveryMode,
     desktopInputScriptPath: process.env.CODEX_WEIXIN_DESKTOP_INPUT_SCRIPT ??
-      path.join(process.cwd(), "scripts", "Send-CodexDesktopInput.ps1"),
+      path.join(PACKAGE_ROOT, "scripts", "Send-CodexDesktopInput.ps1"),
     desktopModelScriptPath: process.env.CODEX_WEIXIN_DESKTOP_MODEL_SCRIPT ??
-      path.join(process.cwd(), "scripts", "Set-CodexDesktopModel.ps1"),
+      path.join(PACKAGE_ROOT, "scripts", "Set-CodexDesktopModel.ps1"),
     desktopResponseTimeoutMs: numberEnv("CODEX_WEIXIN_DESKTOP_RESPONSE_TIMEOUT_MS", 900_000),
     logRoot: bridgeStateRoot,
     maxParallelRuns,
