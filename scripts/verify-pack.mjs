@@ -96,12 +96,16 @@ try {
   }
 
   const installRoot = path.join(temporaryRoot, "install");
-  const unrelatedRoot = path.join(temporaryRoot, "unrelated-cwd");
+  const unrelatedRoot = process.platform === "win32"
+    ? root
+    : path.join(temporaryRoot, "unrelated-cwd");
   const stateRoot = path.join(temporaryRoot, "state");
   const accountDirectory = path.join(stateRoot, "weixin-accounts", "accounts");
   const codexHome = path.join(temporaryRoot, "codex-home");
   mkdirSync(installRoot);
-  mkdirSync(unrelatedRoot);
+  if (unrelatedRoot !== root) {
+    mkdirSync(unrelatedRoot);
+  }
   mkdirSync(accountDirectory, { recursive: true });
   mkdirSync(codexHome);
   writeFileSync(path.join(accountDirectory, "placeholder-im-bot.json"), JSON.stringify({
