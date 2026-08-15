@@ -30,6 +30,7 @@
   "files": [
     ".env.example",
     "dist/",
+    "docs/assets/public-weixin-codex-bridge-hero.png",
     "docs/threat-model-walkthrough.md",
     "scripts/Install-CodexWeixinCompanionShortcut.ps1",
     "scripts/Launch-CodexWithWeixinBridge-Hidden.vbs",

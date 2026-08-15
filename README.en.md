@@ -10,6 +10,8 @@ A focused bridge that connects WeChat messages to local Codex while preserving a
 
 `Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
 
+![Weixin Codex Bridge: secure, local, auditable](./docs/assets/public-weixin-codex-bridge-hero.png)
+
 `WeChat → Authorization → Durable Inbox → Codex → WeChat`
 
 Chinese version: [README.md](./README.md)

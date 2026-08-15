@@ -1,5 +1,7 @@
 # X (Twitter) Launch Assets
 
+Public hero image: [`../assets/public-weixin-codex-bridge-hero.png`](../assets/public-weixin-codex-bridge-hero.png)
+
 ## One-line Positioning
 
 **English:**

@@ -49,6 +49,7 @@ try {
     "README.md",
     "SECURITY.md",
     "dist/cli.js",
+    "docs/assets/public-weixin-codex-bridge-hero.png",
     "docs/threat-model-walkthrough.md",
     "package.json",
     "scripts/Install-CodexWeixinCompanionShortcut.ps1",

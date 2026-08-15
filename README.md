@@ -6,6 +6,8 @@
 
 `Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
 
+![Weixin Codex Bridge：安全、本地、可审计](./docs/assets/public-weixin-codex-bridge-hero.png)
+
 [![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
