@@ -2,11 +2,19 @@
 param(
     [string]$ProjectRoot,
 
-    [string]$StateRoot = "D:\OpenClawWorkspace\tmp\codex-weixin-bridge"
+    [string]$StateRoot
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+    $StateRoot = $env:CODEX_WEIXIN_STATE_ROOT
+    if ([string]::IsNullOrWhiteSpace($StateRoot)) {
+        $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+        $StateRoot = Join-Path $localAppData "codex-weixin-bridge"
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
@@ -28,12 +36,36 @@ foreach ($port in $openClawPorts) {
         Select-Object LocalAddress, LocalPort, OwningProcess
 }
 
-$accountIndexPath = Join-Path $env:USERPROFILE ".openclaw\openclaw-weixin\accounts.json"
+$bridgeAccountDirectory = Join-Path $StateRoot "weixin-accounts\accounts"
+$openClawStateRoot = if ([string]::IsNullOrWhiteSpace($env:OPENCLAW_STATE_DIR)) {
+    Join-Path $env:USERPROFILE ".openclaw"
+}
+else {
+    $env:OPENCLAW_STATE_DIR
+}
+$openClawAccountIndexPath = Join-Path $openClawStateRoot "openclaw-weixin\accounts.json"
+$accountIndexPath = $bridgeAccountDirectory
+$accountIndexSource = "bridge"
+if (-not (Test-Path -LiteralPath $bridgeAccountDirectory)) {
+    $accountIndexPath = $openClawAccountIndexPath
+    $accountIndexSource = "openclaw"
+}
+if (-not (Test-Path -LiteralPath $accountIndexPath)) {
+    $accountIndexPath = $bridgeAccountDirectory
+    $accountIndexSource = "missing"
+}
 $accountIds = @()
 if (Test-Path -LiteralPath $accountIndexPath) {
-    $raw = Get-Content -LiteralPath $accountIndexPath -Raw -Encoding UTF8
-    $parsed = $raw | ConvertFrom-Json
-    $accountIds = @($parsed)
+    if ($accountIndexSource -eq "bridge") {
+        $accountIds = @(Get-ChildItem -LiteralPath $accountIndexPath -Filter "*.json" -File |
+            ForEach-Object { $_.BaseName } |
+            Sort-Object)
+    }
+    else {
+        $raw = Get-Content -LiteralPath $accountIndexPath -Raw -Encoding UTF8
+        $parsed = $raw | ConvertFrom-Json
+        $accountIds = @($parsed)
+    }
 }
 
 $result = [ordered]@{
@@ -44,6 +76,7 @@ $result = [ordered]@{
     bridgeProcesses    = @($bridgeProcesses)
     openClawListeners  = @($openClawListeners)
     accountIndexPath   = $accountIndexPath
+    accountIndexSource = $accountIndexSource
     accountIds         = $accountIds
 }
 

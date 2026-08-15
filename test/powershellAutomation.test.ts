@@ -43,7 +43,9 @@ describe("desktop PowerShell automation scripts", () => {
     expect(script).toContain("bottom-border");
     expect(script).toContain("borderRole");
     expect(script).toContain("CODEX_DESKTOP_INPUT_DEBUG_DIR");
-    expect(script).toContain("D:\\OpenClawWorkspace\\tmp\\codex-weixin-bridge\\debug");
+    expect(script).toContain("CODEX_WEIXIN_STATE_ROOT");
+    expect(script).toContain("LocalApplicationData");
+    expect(script).toContain('Join-Path $stateRoot "debug"');
     expect(script).toContain("Save-WindowScreenshot");
     expect(script).toContain("Capture-DesktopInputDiagnostics");
     expect(script).toContain("[System.Drawing.Imaging.ImageFormat]::Png");
@@ -118,17 +120,17 @@ describe("desktop PowerShell automation scripts", () => {
     expect(shortcutInstaller).toContain("WScript.Shell");
   });
 
-  it("keeps the local PowerShell bridge chain on the explicit D-drive state root", () => {
+  it("keeps the local PowerShell bridge chain on the shared per-user state root", () => {
     const start = readScript("Start-CodexWeixinBridge.ps1");
     const status = readScript("Status-CodexWeixinBridge.ps1");
     const watch = readScript("Watch-CodexWeixinBridge.ps1");
     const companion = readScript("Start-CodexWithWeixinBridge.ps1");
-    const defaultStateRoot = '[string]$StateRoot = "D:\\OpenClawWorkspace\\tmp\\codex-weixin-bridge"';
-
-    expect(start).toContain(defaultStateRoot);
-    expect(status).toContain(defaultStateRoot);
-    expect(watch).toContain(defaultStateRoot);
-    expect(companion).toContain(defaultStateRoot);
+    for (const script of [start, status, watch, companion]) {
+      expect(script).toContain("CODEX_WEIXIN_STATE_ROOT");
+      expect(script).toContain("LocalApplicationData");
+      expect(script).toContain('Join-Path $localAppData "codex-weixin-bridge"');
+      expect(script).not.toContain("D:\\OpenClawWorkspace");
+    }
 
     expect(start).toContain('$env:CODEX_WEIXIN_STATE_ROOT = $StateRoot');
     expect(start).toContain('$env:CODEX_WEIXIN_LOG_ROOT = $StateRoot');
@@ -150,7 +152,9 @@ describe("desktop PowerShell automation scripts", () => {
     expect(script).toContain("CODEX_DESKTOP_APP_ID");
     expect(script).toContain("Get-StartApps");
     expect(script).toContain("Get-NetTCPConnection");
+    expect(script).toContain("weixin-accounts\\accounts");
     expect(script).toContain("openclaw-weixin\\accounts.json");
+    expect(script).toContain("Run npm run login");
     expect(script).toContain("dist\\cli.js");
     expect(script).toContain("Send-CodexDesktopInput.ps1");
     expect(script).toContain("Set-CodexDesktopModel.ps1");
@@ -169,5 +173,19 @@ describe("desktop PowerShell automation scripts", () => {
     expect(script).not.toContain("Codex Weixin bridge setup preflight");
     expect(script).not.toContain("Suggested environment values:");
     expect(pkg.scripts["setup-check"]).toContain("Test-CodexWeixinSetup.ps1");
+  });
+
+  it("reports bridge-managed accounts before the OpenClaw compatibility store", () => {
+    const setup = readScript("Test-CodexWeixinSetup.ps1");
+    const status = readScript("Status-CodexWeixinBridge.ps1");
+
+    expect(status).toContain("weixin-accounts\\accounts");
+    expect(status).toContain("openclaw-weixin\\accounts.json");
+    expect(status).toContain('accountIndexSource = "bridge"');
+    expect(setup).toContain('$accountStateSource = "bridge"');
+    expect(setup).not.toContain("$accountIndexSource");
+    expect(status.indexOf("$bridgeAccountDirectory")).toBeLessThan(
+      status.indexOf("$openClawAccountIndexPath")
+    );
   });
 });

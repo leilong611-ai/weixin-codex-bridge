@@ -1,6 +1,7 @@
-import { existsSync as defaultExistsSync } from "node:fs";
+import { existsSync as defaultExistsSync, readdirSync as defaultReaddirSync } from "node:fs";
 import path from "node:path";
 
+import { bridgeAccountDirectory, openclawAccountIndexPath } from "./accountStore.js";
 import type { BridgeConfig } from "./config.js";
 import { validateWorkspace, type WorkspaceValidation } from "./workspaceSecurity.js";
 
@@ -17,6 +18,7 @@ export interface ConfigDiagnosticCheck {
 export interface ConfigDiagnosticOptions {
   env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   existsSync?: (candidate: string) => boolean;
+  listDirectory?: (candidate: string) => string[];
   nodeVersion?: string;
   validateWorkspace?: (config: BridgeConfig) => WorkspaceValidation;
 }
@@ -43,10 +45,12 @@ export function buildConfigDiagnostics(
 ): ConfigDiagnosticCheck[] {
   const env = options.env ?? process.env;
   const existsSync = options.existsSync ?? defaultExistsSync;
+  const listDirectory = options.listDirectory ?? ((candidate: string) => defaultReaddirSync(candidate));
   const nodeVersion = options.nodeVersion ?? process.versions.node;
   const workspaceValidation = (options.validateWorkspace ?? validateWorkspace)(config);
   const checks: ConfigDiagnosticCheck[] = [];
-  const accountIndexPath = path.join(config.openclawStateRoot, "openclaw-weixin", "accounts.json");
+  const localAccountDirectory = bridgeAccountDirectory(config);
+  const openclawAccountIndex = openclawAccountIndexPath(config);
 
   const nodeMajor = Number.parseInt(nodeVersion.split(".")[0] ?? "", 10);
   checks.push({
@@ -84,7 +88,7 @@ export function buildConfigDiagnostics(
     fix: "Set CODEX_WEIXIN_SANDBOX_ROOT or CODEX_WEIXIN_ALLOWED_WORKSPACE_ROOTS to a dedicated project boundary.",
     label: "Sandbox policy",
     ok: sandboxConfigured,
-    severity: sandboxConfigured ? "ok" : "warn"
+    severity: sandboxConfigured ? "ok" : config.executionMode === "restricted" ? "error" : "warn"
   });
 
   checks.push({
@@ -111,14 +115,26 @@ export function buildConfigDiagnostics(
     });
   }
 
-  checks.push(pathCheck({
-    detail: `Account index: ${accountIndexPath}`,
-    existsSync,
-    fix: "Run the existing Weixin/OpenClaw QR login first, then point OPENCLAW_STATE_DIR at that state root.",
-    label: "Weixin account index",
-    path: accountIndexPath,
-    severity: "error"
-  }));
+  let localAccountExists = false;
+  if (existsSync(localAccountDirectory)) {
+    try {
+      localAccountExists = listDirectory(localAccountDirectory).some((entry) => entry.endsWith(".json"));
+    } catch {
+      localAccountExists = false;
+    }
+  }
+  const openclawAccountExists = existsSync(openclawAccountIndex);
+  checks.push({
+    detail: localAccountExists
+      ? `Bridge account directory: ${localAccountDirectory}`
+      : openclawAccountExists
+        ? `OpenClaw-compatible account index: ${openclawAccountIndex}`
+        : "No bridge or OpenClaw-compatible Weixin account state was found.",
+    fix: "Run `weixin-codex-bridge login`, or point OPENCLAW_STATE_DIR at an existing Weixin state root.",
+    label: "Weixin account state",
+    ok: localAccountExists || openclawAccountExists,
+    severity: localAccountExists || openclawAccountExists ? "ok" : "error"
+  });
 
   const ownerConfigured = config.ownerPeerIds.length > 0;
   checks.push({

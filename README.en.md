@@ -10,6 +10,8 @@ A focused bridge that connects WeChat messages to local Codex while preserving a
 
 `Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
 
+![Weixin Codex Bridge: secure, local, auditable](./docs/assets/public-weixin-codex-bridge-hero.png)
+
 `WeChat → Authorization → Durable Inbox → Codex → WeChat`
 
 Chinese version: [README.md](./README.md)
@@ -148,7 +150,7 @@ Database location: `{state_root}/sqlite/bridge.db` (mode 0600, directory 0700).
 - Node.js 22+ (uses `node:sqlite`)
 - Windows 10/11 for Codex Desktop automation
 - Installed and logged-in Codex Desktop, or Codex CLI
-- WeChat / OpenClaw login state (from `npx openclaw-weixin-cli login`)
+- A WeChat client that can confirm QR login, or existing WeChat/OpenClaw state
 - Dedicated, isolated Codex workspace directory
 
 ## Quick Start
@@ -158,10 +160,22 @@ git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
 npm ci
 npm run build
-npm run doctor
+npm run login
+npm run accounts
 ```
 
-`npm run doctor` is a read-only preflight for Node.js, Codex/Weixin state paths, workspace sandboxing, role allowlists, execution mode, and privacy defaults. It never prints tokens, peer IDs, or QR data. Incomplete configuration produces actionable output and a non-zero exit status.
+`npm run login` renders the WeChat QR code directly in the terminal. The QR payload is never written to a file or log; each account credential file is written by atomic replacement in the private local state directory. Existing OpenClaw WeChat accounts remain readable without migration.
+
+Common CLI commands:
+
+| Action | Command |
+|---|---|
+| QR login | `npm run login` |
+| List accounts and sources | `npm run accounts` |
+| Read-only preflight | `npm run doctor` |
+| Start the bridge | `npm start` |
+| Remove a bridge-managed account | `npm run logout -- <account-id>` |
+| Print version or help | `node dist/cli.js version` / `node dist/cli.js help` |
 
 **Note:** The project does not read `.env` automatically. Export variables via shell or process manager.
 
@@ -184,7 +198,15 @@ export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 
 ### Start the Bridge
 
-Complete QR login with the upstream Weixin/OpenClaw client first, then point `OPENCLAW_STATE_DIR` at the state root containing `openclaw-weixin/accounts.json`.
+After exporting the security configuration, run the read-only preflight:
+
+```bash
+npm run doctor
+```
+
+It checks Node.js, Codex/Weixin state paths, workspace sandboxing, role allowlists, execution mode, and privacy defaults. It never prints tokens, peer IDs, or QR data. Incomplete configuration produces actionable output and a non-zero exit status.
+
+If you already have an OpenClaw WeChat login, skip `npm run login` and point `OPENCLAW_STATE_DIR` at the state root containing `openclaw-weixin/accounts.json`.
 
 Windows users can run the read-only preflight:
 
@@ -193,14 +215,14 @@ npm run doctor
 npm run setup-check
 ```
 
-macOS/Linux currently support the `codex-cli` path only, not Windows Desktop UI automation. Contributors can run a sanitized local validation that creates only a temporary workspace, empty account index, and fake Codex command; it does not connect to Weixin or execute Codex:
+macOS/Linux currently support the `codex-cli` path only, not Windows Desktop UI automation. Contributors can run a sanitized local validation that creates only a temporary workspace, placeholder account state, and fake Codex command; it does not connect to Weixin or execute Codex:
 
 ```bash
 npm run build
 npm run validate:cli-only
 ```
 
-Real operation still requires an installed Codex CLI, an isolated workspace, and existing Weixin/OpenClaw login state.
+Real operation still requires an installed Codex CLI, an isolated workspace, and one usable WeChat login.
 
 Once configuration and login state are ready:
 
@@ -215,10 +237,10 @@ npm ci
 npm run build
 npm test -- --run
 npm run public-check
-npm pack --dry-run --json
+npm run pack:verify
 ```
 
-CI runs 28 test files / 257 tests on Windows. Linux runs 27 files / 255 tests, with two Windows-only PowerShell integration tests skipped.
+CI runs the complete platform-appropriate suite on Windows and Linux, followed by public-repository and extracted-package checks.
 
 ## Known Limitations
 
@@ -234,7 +256,7 @@ CI runs 28 test files / 257 tests on Windows. Linux runs 27 files / 255 tests, w
 
 The current scope is private WeChat text messages, one focused bridge, local Codex execution, and security-first routing.
 
-Media messages, group chat, and macOS/Linux CLI validation may be researched first. A multi-agent platform, universal IM gateway, hosted SaaS, and complete agent orchestration are out of scope.
+macOS/Linux support the `codex-cli` path. Media messages and group chat still require security design or validation first. A multi-agent platform, universal IM gateway, hosted SaaS, and complete agent orchestration are out of scope.
 
 ## Security Recommendations
 
@@ -250,6 +272,7 @@ Media messages, group chat, and macOS/Linux CLI validation may be researched fir
 ## Documents
 
 - [SECURITY.md](./SECURITY.md) — threat model, vulnerability reporting
+- [docs/threat-model-walkthrough.md](./docs/threat-model-walkthrough.md) — end-to-end reviewer walkthrough
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — development guide, PR checklist
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 - [LICENSE](./LICENSE) — MIT

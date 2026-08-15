@@ -27,6 +27,9 @@ src/
   messagePayload.ts    — Payload preparation, role-based filtering, scrubbing
   dataRetention.ts     — Cleanup, WAL checkpoint, database info
   bridge.ts            — Main bridge orchestration
+  accountStore.ts      — Private account storage and OpenClaw compatibility
+  weixinLogin.ts       — Standalone QR login without QR persistence
+  cli.ts               — Unified command-line lifecycle
   auth.ts              — Role resolution, command access
   sessionKey.ts        — Deterministic session key derivation
   codexRunner.ts       — Codex CLI runner
@@ -59,9 +62,10 @@ Types: `fix`, `feat`, `refactor`, `docs`, `test`, `chore`, `perf`, `ci`
 1. Run `npm run build` — must pass with zero errors
 2. Run `npm test -- --run` — all tests must pass
 3. Run `npm run public-check` — no secret patterns in the diff
-4. Review your diff for absolute paths, account identifiers, and copied local logs
-5. Update docs if behavior, commands, or boundaries changed
-6. Note any security impact, especially around session isolation, credential handling, or data privacy
+4. Run `npm run pack:verify` — install and exercise the private package artifact
+5. Review your diff for absolute paths, account identifiers, and copied local logs
+6. Update docs if behavior, commands, or boundaries changed
+7. Note any security impact, especially around session isolation, credential handling, or data privacy
 
 ## Testing Requirements
 
@@ -77,6 +81,9 @@ All new logic must have corresponding tests:
 | dataRetention | test/dataRetention.test.ts |
 | bridge | test/bridge.test.ts |
 | auth | test/auth.test.ts |
+| accountStore | test/accountStore.test.ts |
+| weixinLogin | test/weixinLogin.test.ts |
+| cli | test/cli.test.ts |
 
 Tests must:
 
@@ -100,6 +107,10 @@ If your change touches any of the following, call it out clearly in the PR:
 - Environment variable handling (config.ts)
 
 If in doubt, prefer a smaller patch with a clearer explanation.
+
+## Release Verification
+
+Releases remain an explicit maintainer action. Before creating a tag, dispatch the `release-verify` workflow from `main` with the package version. It requires the target to be the current green `origin/main` commit and reruns metadata, build, test, public-check, installed-package, and Linux CLI-only checks on the supported CI platforms. It does not publish to npm or create a tag.
 
 ## Prohibited
 

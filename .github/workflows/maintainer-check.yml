@@ -39,3 +39,4 @@ jobs:
           test -f CONTRIBUTING.md
           test -f SECURITY.md
           test -f CHANGELOG.md
+          test -f docs/threat-model-walkthrough.md

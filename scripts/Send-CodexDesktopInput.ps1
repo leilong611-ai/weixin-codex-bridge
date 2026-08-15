@@ -200,7 +200,12 @@ function Get-ObjectPropertyValue([object]$Object, [string]$Name, [object]$Defaul
 function Get-DesktopInputDebugDir {
     $debugDir = [Environment]::GetEnvironmentVariable("CODEX_DESKTOP_INPUT_DEBUG_DIR")
     if ([string]::IsNullOrWhiteSpace($debugDir)) {
-        return "D:\OpenClawWorkspace\tmp\codex-weixin-bridge\debug"
+        $stateRoot = [Environment]::GetEnvironmentVariable("CODEX_WEIXIN_STATE_ROOT")
+        if ([string]::IsNullOrWhiteSpace($stateRoot)) {
+            $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+            $stateRoot = Join-Path $localAppData "codex-weixin-bridge"
+        }
+        return (Join-Path $stateRoot "debug")
     }
 
     return $debugDir

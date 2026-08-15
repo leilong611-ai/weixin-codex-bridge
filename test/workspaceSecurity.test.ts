@@ -99,6 +99,74 @@ describe("validateWorkspace", () => {
     }
   });
 
+  it("fails closed when restricted mode has no explicit workspace boundary", () => {
+    const testRoot = makeWorkspaceTestRoot(`ws-unbounded-${Date.now()}`);
+    fs.mkdirSync(testRoot, { recursive: true });
+    try {
+      const result = validateWorkspace(makeConfig({
+        allowedWorkspaceRoots: [],
+        codexCwd: testRoot,
+        sandboxRoot: ""
+      }));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("requires CODEX_WEIXIN_SANDBOX_ROOT");
+    } finally {
+      fs.rmSync(testRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a workspace symlink or Windows junction that escapes the real sandbox", () => {
+    const testRoot = makeWorkspaceTestRoot(`ws-symlink-${Date.now()}`);
+    const sandboxDir = path.join(testRoot, "sandbox");
+    const outsideDir = path.join(testRoot, "outside");
+    const linkDir = path.join(sandboxDir, "linked-project");
+    fs.mkdirSync(sandboxDir, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
+    fs.symlinkSync(outsideDir, linkDir, process.platform === "win32" ? "junction" : "dir");
+    try {
+      const result = validateWorkspace(makeConfig({ codexCwd: linkDir, sandboxRoot: sandboxDir }));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("outside the sandbox root");
+    } finally {
+      fs.rmSync(testRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves POSIX path case while checking containment", () => {
+    if (process.platform !== "linux") {
+      return;
+    }
+    const testRoot = makeWorkspaceTestRoot(`ws-case-${Date.now()}`);
+    const allowedDir = path.join(testRoot, "Safe");
+    const outsideDir = path.join(testRoot, "safe", "project");
+    fs.mkdirSync(allowedDir, { recursive: true });
+    fs.mkdirSync(outsideDir, { recursive: true });
+    try {
+      const result = validateWorkspace(makeConfig({
+        allowedWorkspaceRoots: [allowedDir],
+        codexCwd: outsideDir,
+        sandboxRoot: ""
+      }));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("allowed workspace root");
+    } finally {
+      fs.rmSync(testRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a missing workspace instead of skipping realpath validation", () => {
+    const testRoot = makeWorkspaceTestRoot(`ws-missing-${Date.now()}`);
+    fs.mkdirSync(testRoot, { recursive: true });
+    try {
+      const missing = path.join(testRoot, "missing");
+      const result = validateWorkspace(makeConfig({ codexCwd: missing, sandboxRoot: testRoot }));
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("does not resolve to an existing path");
+    } finally {
+      fs.rmSync(testRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows workspace inside sandbox root", () => {
     const testId = `ws-inside-${Date.now()}`;
     const testRoot = makeWorkspaceTestRoot(testId);

@@ -6,6 +6,8 @@
 
 `Default-deny` · `Session isolation` · `Sandboxed execution` · `Durable recovery`
 
+![Weixin Codex Bridge：安全、本地、可审计](./docs/assets/public-weixin-codex-bridge-hero.png)
+
 [![ci](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/leilong611-ai/weixin-codex-bridge/actions/workflows/ci.yml)
 [![GitHub stars](https://img.shields.io/github/stars/leilong611-ai/weixin-codex-bridge?style=social)](https://github.com/leilong611-ai/weixin-codex-bridge/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
@@ -158,7 +160,7 @@ SQLite 数据库默认保存在配置的本地状态目录。
 - Node.js 22+
 - Windows 10/11：使用 Codex Desktop 自动化
 - 已安装并登录 Codex Desktop，或已安装 Codex CLI
-- 已存在可读取的微信/OpenClaw 登录态
+- 可扫码确认登录的微信客户端；也兼容已有微信/OpenClaw 登录态
 - 一个专用、隔离的 Codex workspace
 
 ## 快速开始
@@ -168,10 +170,22 @@ git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
 npm ci
 npm run build
-npm run doctor
+npm run login
+npm run accounts
 ```
 
-`npm run doctor` 是只读预检；它会检查 Node.js、Codex/微信状态路径、Workspace 沙箱、角色白名单、执行模式和隐私默认值，不会输出 token、peer ID 或 QR 数据。配置未就绪时以非零状态退出并给出修复建议。
+`npm run login` 直接在终端显示微信二维码。二维码内容不会写入文件或日志；每个账号凭据文件会以原子替换方式写入本机私有状态目录。已有 OpenClaw 微信账号仍可直接读取，无需迁移。
+
+常用 CLI：
+
+| 操作 | 命令 |
+|---|---|
+| 二维码登录 | `npm run login` |
+| 列出账号及来源 | `npm run accounts` |
+| 只读预检 | `npm run doctor` |
+| 启动桥接器 | `npm start` |
+| 删除本项目管理的账号 | `npm run logout -- <account-id>` |
+| 查看版本或帮助 | `node dist/cli.js version` / `node dist/cli.js help` |
 
 复制配置（注意：项目不会自动读取 `.env`，需要通过 shell 或进程管理器导出环境变量）：
 
@@ -208,7 +222,15 @@ export CODEX_WEIXIN_DATA_RETENTION_DAYS=7
 
 ### 启动
 
-先使用上游微信/OpenClaw 客户端完成二维码登录，并让 `OPENCLAW_STATE_DIR` 指向包含 `openclaw-weixin/accounts.json` 的状态目录。
+安全配置导出后运行只读预检：
+
+```bash
+npm run doctor
+```
+
+它会检查 Node.js、Codex/微信状态路径、Workspace 沙箱、角色白名单、执行模式和隐私默认值，不会输出 token、peer ID 或 QR 数据。配置未就绪时以非零状态退出并给出修复建议。
+
+如果你已有 OpenClaw 微信登录态，可以不运行 `npm run login`，只需让 `OPENCLAW_STATE_DIR` 指向包含 `openclaw-weixin/accounts.json` 的状态目录。
 
 Windows 用户可先运行只读预检：
 
@@ -217,14 +239,14 @@ npm run doctor
 npm run setup-check
 ```
 
-macOS/Linux 当前仅支持 `codex-cli` 路径，不支持 Windows Desktop UI 自动化。贡献者可运行完全脱敏的本地验证；它只创建临时 workspace、空账号索引和假 Codex 命令，不连接微信、不执行 Codex：
+macOS/Linux 当前仅支持 `codex-cli` 路径，不支持 Windows Desktop UI 自动化。贡献者可运行完全脱敏的本地验证；它只创建临时 workspace、占位账号状态和假 Codex 命令，不连接微信、不执行 Codex：
 
 ```bash
 npm run build
 npm run validate:cli-only
 ```
 
-真实运行时仍需要已安装的 Codex CLI、隔离 workspace 和已有微信/OpenClaw 登录态。
+真实运行时仍需要已安装的 Codex CLI、隔离 workspace 和一个可用的微信登录态。
 
 配置与登录态就绪后启动桥接器：
 
@@ -239,7 +261,7 @@ npm ci
 npm run build
 npm test -- --run
 npm run public-check
-npm pack --dry-run --json
+npm run pack:verify
 ```
 
 测试覆盖：
@@ -255,6 +277,7 @@ npm pack --dry-run --json
 | bridge | 消息处理路由/Desktop 失败/CLI 回退/长回复拆分/并行/会话隔离 |
 | auth | 角色解析/命令访问/启动守卫 |
 | sessionIsolation | session key 确定性/跨用户隔离 |
+| accountStore / weixinLogin / cli | 私有账号存储、兼容读取、二维码登录和 CLI 生命周期 |
 
 ## 已知限制
 
@@ -270,7 +293,7 @@ npm pack --dry-run --json
 
 当前范围是微信私聊文本、单一聚焦桥接层、本地 Codex 执行和安全优先路由。
 
-媒体消息、群聊与 macOS/Linux CLI 模式可以先做设计或验证；多 agent 平台、通用 IM 网关、托管 SaaS 和完整 agent orchestration 不在项目范围内。
+macOS/Linux 已支持 `codex-cli` 路径。媒体消息与群聊仍需先做安全设计或验证；多 agent 平台、通用 IM 网关、托管 SaaS 和完整 agent orchestration 不在项目范围内。
 
 ## 安全建议
 
@@ -287,6 +310,7 @@ npm pack --dry-run --json
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — 贡献指南
 - [SECURITY.md](./SECURITY.md) — 安全策略与威胁模型
+- [docs/threat-model-walkthrough.md](./docs/threat-model-walkthrough.md) — 端到端威胁模型走查
 - [CHANGELOG.md](./CHANGELOG.md) — 版本变更
 - [LICENSE](./LICENSE) — MIT 许可
 

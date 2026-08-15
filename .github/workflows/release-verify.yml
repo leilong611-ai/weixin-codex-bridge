@@ -1,0 +1,76 @@
+name: release-verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  checks: read
+  contents: read
+
+jobs:
+  verify-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the main branch
+        run: test "${{ github.ref }}" = "refs/heads/main"
+
+      - name: Check out the release target
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require the current origin/main commit
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Require green main checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          for name in test-linux test-windows maintainer-check; do
+            check=$(gh api -H "Accept: application/vnd.github+json" \
+              "repos/${{ github.repository }}/commits/$RELEASE_SHA/check-runs?per_page=100" \
+              --jq ".check_runs | map(select(.name == \"$name\" and .app.slug == \"github-actions\")) | max_by(.id) | [(.status // \"\"), (.conclusion // \"\")] | @tsv")
+            status=$(printf '%s' "$check" | cut -f1)
+            conclusion=$(printf '%s' "$check" | cut -f2)
+            if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+              echo "Required check $name is not green: status=${status:-missing} conclusion=${conclusion:-missing}"
+              exit 1
+            fi
+          done
+
+  verify-package:
+    needs: verify-main
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+    steps:
+      - name: Check out the release target
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release verification
+        run: npm run release:verify
+
+      - name: Validate the CLI-only path
+        if: runner.os == 'Linux'
+        run: npm run validate:cli-only

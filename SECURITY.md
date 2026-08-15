@@ -24,6 +24,8 @@
 - Codex workspace files and generated code
 - Local console session
 
+For a message-by-message review of these boundaries, see [docs/threat-model-walkthrough.md](./docs/threat-model-walkthrough.md).
+
 ### Attackers
 
 | Attacker | Capability |
@@ -80,6 +82,14 @@
 - Log redaction for tokens, account IDs, paths, emails, phone numbers
 - Database file permissions: 0600 (POSIX), directory: 0700
 - Files whitelist in package.json prevents accidental publication of sensitive files
+
+### Login Credentials
+
+- QR payloads are rendered only in the terminal and are not written to files or logs
+- Each bridge-managed credential file is written by atomic replacement under the configured state root; account discovery derives from the credential directory to avoid a shared mutable index
+- Account directories use mode 0700 and account files use mode 0600 on POSIX systems
+- Existing OpenClaw-compatible credentials are read without migration and are never deleted by bridge `logout`
+- Account identifiers are validated before they are used as filenames
 
 ### Console Security
 

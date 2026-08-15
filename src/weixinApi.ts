@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 
 import type { BridgeConfig } from "./config.js";
 import { MessageItemType, MessageState, MessageType, type GetUpdatesResp, type SendMessageReq, type WeixinAccount } from "./types.js";
+import { normalizeWeixinEndpoint } from "./weixinEndpoint.js";
 
 function ensureTrailingSlash(url: string): string {
   return url.endsWith("/") ? url : `${url}/`;
@@ -41,10 +42,14 @@ async function loadRouteTag(config: BridgeConfig, accountId: string): Promise<st
 }
 
 export class WeixinApi {
+  private readonly baseUrl: string;
+
   constructor(
     private readonly config: BridgeConfig,
     private readonly account: WeixinAccount
-  ) {}
+  ) {
+    this.baseUrl = normalizeWeixinEndpoint(account.baseUrl);
+  }
 
   async getUpdates(getUpdatesBuf: string, timeoutMs: number): Promise<GetUpdatesResp> {
     const body = JSON.stringify({
@@ -97,7 +102,7 @@ export class WeixinApi {
   }
 
   private async post(endpoint: string, body: string, timeoutMs: number, label: string): Promise<string> {
-    const url = new URL(endpoint, ensureTrailingSlash(this.account.baseUrl));
+    const url = new URL(endpoint, ensureTrailingSlash(this.baseUrl));
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -110,7 +115,7 @@ export class WeixinApi {
       });
       const raw = await response.text();
       if (!response.ok) {
-        throw new Error(`${label} failed with HTTP ${response.status}: ${raw}`);
+        throw new Error(`${label} failed with HTTP ${response.status}.`);
       }
 
       return raw;
