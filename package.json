@@ -69,7 +69,7 @@
     "pack:verify": "node scripts/verify-pack.mjs"
   },
   "dependencies": {
-    "acpx": "0.3.1",
+    "acpx": "0.13.0",
     "qrcode-terminal": "0.12.0"
   },
   "devDependencies": {
