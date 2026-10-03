@@ -20,7 +20,7 @@ jobs:
         run: test "${{ github.ref }}" = "refs/heads/main"
 
       - name: Check out the release target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -57,7 +57,7 @@ jobs:
       RELEASE_VERSION: ${{ inputs.version }}
     steps:
       - name: Check out the release target
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
