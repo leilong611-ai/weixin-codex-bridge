@@ -21,7 +21,7 @@
     "url": "https://github.com/leilong611-ai/weixin-codex-bridge/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "main": "dist/cli.js",
   "bin": {

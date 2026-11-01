@@ -6,6 +6,37 @@ import { buildConfigDiagnosticReport, buildConfigDiagnostics } from "../src/conf
 import type { BridgeConfig } from "../src/config.js";
 
 describe("buildConfigDiagnostics", () => {
+  it.each([
+    ["20.19.0", false],
+    ["22.0.0", false],
+    ["22.11.0", false],
+    ["22.12.0", false],
+    ["22.13.0", true],
+    ["22.13.1", true],
+    ["22.18.0", true],
+    ["24.0.0", true],
+    ["", false],
+    ["22", false],
+    ["22.13", false],
+    ["22.13.0-rc.1", false],
+    ["22.13.0junk", false],
+    ["not-a-version", false]
+  ])("checks the full Node.js version %s against the minimum", (nodeVersion, supported) => {
+    const checks = buildConfigDiagnostics(makeConfig("C:\\work\\project"), {
+      env: {},
+      existsSync: () => false,
+      nodeVersion
+    });
+
+    expect(checks.find((check) => check.label === "Node.js version")).toEqual({
+      detail: `Node.js ${nodeVersion}; required >=22.13.0.`,
+      fix: "Install Node.js 22.13.0 or newer.",
+      label: "Node.js version",
+      ok: supported,
+      severity: supported ? "ok" : "error"
+    });
+  });
+
   it("flags the paths most likely to break on a new computer", () => {
     const config = makeConfig("C:\\missing-project");
     const checks = buildConfigDiagnostics(config, {
