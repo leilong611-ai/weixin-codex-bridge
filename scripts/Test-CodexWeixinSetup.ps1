@@ -179,7 +179,7 @@ Add-Check `
     -Ok (Test-CommandExists -CommandName "node") `
     -Severity "error" `
     -Detail "node" `
-    -Fix "Install Node.js >= 22 and reopen PowerShell."
+    -Fix "Install Node.js >= 22.13.0 and reopen PowerShell."
 
 Add-Check `
     -Name "npm command" `

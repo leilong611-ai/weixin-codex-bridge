@@ -147,7 +147,7 @@ Database location: `{state_root}/sqlite/bridge.db` (mode 0600, directory 0700).
 
 ## Requirements
 
-- Node.js 22+ (uses `node:sqlite`)
+- Node.js 22.13.0+ (uses `node:sqlite`)
 - Windows 10/11 for Codex Desktop automation
 - Installed and logged-in Codex Desktop, or Codex CLI
 - A WeChat client that can confirm QR login, or existing WeChat/OpenClaw state
