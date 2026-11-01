@@ -52,13 +52,16 @@ export function buildConfigDiagnostics(
   const localAccountDirectory = bridgeAccountDirectory(config);
   const openclawAccountIndex = openclawAccountIndexPath(config);
 
-  const nodeMajor = Number.parseInt(nodeVersion.split(".")[0] ?? "", 10);
+  const nodeMatch = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(nodeVersion);
+  const nodeParts = nodeMatch?.slice(1).map(Number);
+  const nodeSupported = nodeParts?.every(Number.isSafeInteger) === true &&
+    (nodeParts[0] > 22 || (nodeParts[0] === 22 && nodeParts[1] >= 13));
   checks.push({
-    detail: `Node.js ${nodeVersion}; required >=22.`,
-    fix: "Install Node.js 22 or newer.",
+    detail: `Node.js ${nodeVersion}; required >=22.13.0.`,
+    fix: "Install Node.js 22.13.0 or newer.",
     label: "Node.js version",
-    ok: Number.isFinite(nodeMajor) && nodeMajor >= 22,
-    severity: Number.isFinite(nodeMajor) && nodeMajor >= 22 ? "ok" : "error"
+    ok: nodeSupported,
+    severity: nodeSupported ? "ok" : "error"
   });
 
   checks.push(pathCheck({

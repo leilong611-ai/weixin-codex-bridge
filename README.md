@@ -157,7 +157,7 @@ SQLite 数据库默认保存在配置的本地状态目录。
 
 ## 环境要求
 
-- Node.js 22+
+- Node.js 22.13.0+
 - Windows 10/11：使用 Codex Desktop 自动化
 - 已安装并登录 Codex Desktop，或已安装 Codex CLI
 - 可扫码确认登录的微信客户端；也兼容已有微信/OpenClaw 登录态

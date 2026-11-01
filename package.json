@@ -21,7 +21,7 @@
     "url": "https://github.com/leilong611-ai/weixin-codex-bridge/issues"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "main": "dist/cli.js",
   "bin": {
@@ -73,7 +73,7 @@
     "qrcode-terminal": "0.12.0"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

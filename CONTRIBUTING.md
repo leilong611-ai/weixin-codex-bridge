@@ -6,7 +6,7 @@ This repository is intentionally narrow in scope: a standalone WeChat-to-Codex b
 
 ## Development Environment
 
-- Node.js 22+ (uses `node:sqlite`)
+- Node.js 22.13.0+ (uses `node:sqlite`)
 - TypeScript (compiled via `tsc`)
 - Vitest for testing
 - Git for version control
