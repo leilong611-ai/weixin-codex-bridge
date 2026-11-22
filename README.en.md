@@ -155,6 +155,10 @@ Database location: `{state_root}/sqlite/bridge.db` (mode 0600, directory 0700).
 
 ## Quick Start
 
+For a first install, you can use the published [v0.4.0 release](https://github.com/leilong611-ai/weixin-codex-bridge/releases/tag/v0.4.0). To use that version, run `git checkout v0.4.0` after the `cd` command below.
+
+Windows supports Codex Desktop automation or Codex CLI. On macOS and Linux, use Codex CLI. Before starting the bridge, prepare a dedicated workspace and complete the configuration and read-only preflight below.
+
 ```bash
 git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
