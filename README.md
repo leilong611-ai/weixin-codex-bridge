@@ -165,6 +165,10 @@ SQLite 数据库默认保存在配置的本地状态目录。
 
 ## 快速开始
 
+初次安装可选择已发布的 [v0.4.0](https://github.com/leilong611-ai/weixin-codex-bridge/releases/tag/v0.4.0)。如需固定版本，在下方 `cd` 之后执行 `git checkout v0.4.0`。
+
+Windows 可用 Codex Desktop 自动化或 Codex CLI。macOS 和 Linux 使用 Codex CLI。启动前先准备一个独立工作目录，并完成下方的配置和只读预检。
+
 ```bash
 git clone https://github.com/leilong611-ai/weixin-codex-bridge.git
 cd weixin-codex-bridge
